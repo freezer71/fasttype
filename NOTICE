@@ -1,0 +1,8 @@
+fasttype — clone de Monkeytype pour le terminal.
+
+Ce projet reprend le comportement, les formules et les données
+(langues, citations, thèmes) de Monkeytype :
+  https://github.com/monkeytypegame/monkeytype
+  commit 574d819 (2026-10-06), sous licence GPL-3.0.
+
+fasttype est distribué sous la même licence (GPL-3.0, voir LICENSE).
