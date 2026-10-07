@@ -4,6 +4,7 @@
 pub mod chars;
 pub mod clock;
 pub mod event;
+pub mod generator;
 pub mod numbers;
 pub mod punctuation;
 pub mod quote;
