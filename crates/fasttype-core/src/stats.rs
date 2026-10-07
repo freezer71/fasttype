@@ -1,7 +1,7 @@
 //! Statistiques calculées depuis le journal, fonction par fonction comme
 //! `frontend/src/ts/test/events/stats.ts`.
 
-use crate::chars::{CharCounts, count_words};
+use crate::chars::{CharCounts, count_chars, count_words};
 use crate::event::apply_event;
 use crate::event::{EventKind, EventLog, active_word_index};
 use crate::numbers::calculate_wpm;
@@ -210,6 +210,13 @@ pub fn error_count_history(log: &EventLog) -> Vec<u32> {
 pub fn wpm_history(log: &EventLog) -> Vec<f64> {
     let boundaries = timer_boundaries(log);
     let mut inputs: BTreeMap<u32, String> = BTreeMap::new();
+    // Comme Monkeytype (`cachedIfLast` / `cachedIfNotLast`), le compte de chaque
+    // mot n'est recalculé que si ses événements ont changé depuis la borne
+    // précédente : sans ce cache, le coût est (secondes × mots).
+    let mut not_last: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut as_last: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut not_last_sum: u32 = 0;
+    let mut dirty: Vec<u32> = Vec::new();
     let mut idx = 0;
     let mut out = Vec::with_capacity(boundaries.len());
     for &b in &boundaries {
@@ -218,19 +225,29 @@ pub fn wpm_history(log: &EventLog) -> Vec<f64> {
                 break;
             }
             apply_event(&mut inputs, &e.kind);
+            if let Some(w) = e.kind.word_index() {
+                dirty.push(w);
+            }
             idx += 1;
         }
+        dirty.sort_unstable();
+        dirty.dedup();
+        for &w in &dirty {
+            let input = inputs[&w].as_str();
+            let target = log.target(w).unwrap_or(input);
+            let fresh = count_chars(input, target, false).correct_word;
+            not_last_sum = not_last_sum - not_last.insert(w, fresh).unwrap_or(0) + fresh;
+            as_last.insert(w, count_chars(input, target, true).correct_word);
+        }
+        dirty.clear();
+        // Les mots après le mot actif sont vides (0) ; le mot actif compte
+        // avec crédit partiel à la place de son compte « non dernier ».
         let active = active_word_index(&inputs);
-        let c = count_words(
-            inputs
-                .iter()
-                .map(|(&i, s)| (s.as_str(), log.target(i).unwrap_or(s.as_str()), i == active)),
-            true,
-        );
-        out.push(js_round(calculate_wpm(
-            f64::from(c.correct_word),
-            b / 1000.0,
-        )));
+        let correct_word = match as_last.get(&active) {
+            Some(&last) => not_last_sum - not_last[&active] + last,
+            None => not_last_sum,
+        };
+        out.push(js_round(calculate_wpm(f64::from(correct_word), b / 1000.0)));
     }
     out
 }
