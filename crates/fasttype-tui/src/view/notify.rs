@@ -1,6 +1,6 @@
 //! Notifications en pile en haut à droite (`states/notifications.ts`) : 3 s,
 //! et les erreurs restent jusqu'à « Clear all notifications ». Pendant la
-//! frappe, seules les erreurs restent visibles.
+//! frappe, elles sont toutes cachées.
 
 use crate::theme::Palette;
 use ratatui::buffer::Buffer;
@@ -64,13 +64,13 @@ impl Notifications {
         &self.items
     }
 
-    /// Dessine la pile ; `typing` : seules les erreurs restent visibles.
+    /// Dessine la pile ; rien pendant la frappe (`Notifications.tsx` cache
+    /// les notifications non importantes), pour ne jamais couvrir les mots.
     pub fn render(&self, buf: &mut Buffer, area: Rect, palette: &Palette, typing: bool) {
-        let shown = self
-            .items
-            .iter()
-            .filter(|n| !typing || n.level == Level::Error);
-        for (i, n) in shown.enumerate() {
+        if typing {
+            return;
+        }
+        for (i, n) in self.items.iter().enumerate() {
             let y = area.y + 1 + i as u16;
             if y >= area.bottom() {
                 break;

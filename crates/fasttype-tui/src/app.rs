@@ -33,7 +33,7 @@ use fasttype_core::session::{InputOutcome, SessionState, TestSession};
 use fasttype_core::spec::Mode;
 use fasttype_data::themes::{Rgba, Theme};
 use fasttype_data::{DEFAULT_THEME, theme};
-use fasttype_store::{Config, RecordOutcome, Store};
+use fasttype_store::{Config, ConfigWarning, RecordOutcome, Store};
 use ratatui::Frame;
 use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::Rect;
@@ -70,6 +70,16 @@ fn can_bail_out(spec: &fasttype_core::spec::TestSpec) -> bool {
 /// Nom du texte custom en cours dans `custom_texts/`.
 pub const CURRENT_CUSTOM_TEXT: &str = "current";
 
+/// Citation choisie par « Search for quotes » : « langue id », dans le dossier de données.
+pub const SELECTED_QUOTE_FILE: &str = "selected_quote.txt";
+
+/// La citation choisie au dernier lancement, si elle vaut pour la langue en cours.
+fn saved_quote(store: &Store) -> Option<u32> {
+    let text = std::fs::read_to_string(store.paths.data_dir.join(SELECTED_QUOTE_FILE)).ok()?;
+    let (language, id) = text.trim().split_once(' ')?;
+    (language == store.config.str("language")).then(|| id.parse().ok())?
+}
+
 /// Citations d'une langue dans la palette : le début du texte, la source en alias.
 fn quote_commands(file: &QuoteFile) -> Vec<Command> {
     file.quotes
@@ -79,7 +89,9 @@ fn quote_commands(file: &QuoteFile) -> Vec<Command> {
             if q.text.chars().count() > 64 {
                 text.push('…');
             }
-            Command::new(text, Action::App(AppAction::SelectQuote(q.id))).alias(&q.source)
+            // la recherche porte sur toute la citation et sa source
+            let alias = format!("{} {}", q.source, q.text);
+            Command::new(text, Action::App(AppAction::SelectQuote(q.id))).alias(&alias)
         })
         .collect()
 }
@@ -293,6 +305,7 @@ impl App {
         let (theme, theme_warnings) = resolve_theme(&store.config);
         let mut factory = SessionFactory::new();
         factory.custom_text = store.custom_texts.load(CURRENT_CUSTOM_TEXT).ok();
+        factory.selected_quote = saved_quote(&store);
         let built = factory.build(&store.config, seed);
         let mut app = App {
             palette: Palette::from_theme(&theme, color_mode),
@@ -562,6 +575,18 @@ impl App {
             Action::App(AppAction::SelectQuote(id)) => {
                 // `quoteLength = [-2]` : la citation choisie, à chaque restart
                 self.factory.selected_quote = Some(id);
+                // gardée pour le prochain lancement, comme `selectedQuoteId` du site
+                let language = self.store.config.str("language");
+                let file = self.store.paths.data_dir.join(SELECTED_QUOTE_FILE);
+                if let Err(e) =
+                    fasttype_store::fs::write_atomic(&file, format!("{language} {id}").as_bytes())
+                {
+                    self.notifications.push(
+                        format!("could not save the selected quote: {e}"),
+                        Level::Error,
+                        now,
+                    );
+                }
                 let lengths = Value::Array(vec![Value::Integer(-2)]);
                 if self.store.config.set("quoteLength", lengths).is_ok() {
                     self.save_settings(now);
@@ -589,11 +614,32 @@ impl App {
             }
             Action::App(AppAction::ExportSettings) => {
                 self.clipboard = Some(self.store.config.to_toml());
-                self.notifications
-                    .push("Settings copied to clipboard", Level::Notice, now);
+                // certains terminaux (Terminal.app, tmux par défaut) ignorent OSC 52
+                let path = self.store.paths.config_file();
+                self.notifications.push(
+                    format!(
+                        "Settings sent to the clipboard (OSC 52) - also in {}",
+                        path.display()
+                    ),
+                    Level::Notice,
+                    now,
+                );
             }
             Action::App(AppAction::ImportSettings(text)) => {
                 let (config, warnings) = Config::from_toml(&text);
+                // texte illisible : on ne touche à rien (`applyConfigFromJson`)
+                if let Some(ConfigWarning::Syntax(e)) = warnings
+                    .iter()
+                    .find(|w| matches!(w, ConfigWarning::Syntax(_)))
+                {
+                    let first = e.lines().next().unwrap_or_default();
+                    self.notifications.push(
+                        format!("Failed to import settings: {first}"),
+                        Level::Error,
+                        now,
+                    );
+                    return;
+                }
                 for w in warnings {
                     self.notifications.push(w.to_string(), Level::Error, now);
                 }

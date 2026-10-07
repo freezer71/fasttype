@@ -86,12 +86,10 @@ fn export_copies_the_settings_and_import_applies_them() {
     let toml = a.take_clipboard().expect("réglages à copier");
     assert!(toml.contains("time = 60"), "{toml}");
     assert!(a.take_clipboard().is_none(), "une seule fois");
-    assert!(
-        a.notifications
-            .items()
-            .iter()
-            .any(|n| n.text == "Settings copied to clipboard")
-    );
+    assert!(a.notifications.items().iter().any(|n| {
+        n.text
+            .starts_with("Settings sent to the clipboard (OSC 52) - also in")
+    }));
     let original = *a.palette();
     command(&mut a, "import", 0.0);
     a.handle(Input::Paste("time = 15\ntheme = \"dracula\"\n".into()));
@@ -130,7 +128,7 @@ fn a_new_language_loads_in_the_background() {
 }
 
 #[test]
-fn errors_stay_and_notices_hide_while_typing() {
+fn errors_stay_but_nothing_covers_the_words_while_typing() {
     let mut a = app("ex-notif", "language = \"klingon_9000k\"\n");
     a.tick(100_000.0);
     assert!(
@@ -145,18 +143,96 @@ fn errors_stay_and_notices_hide_while_typing() {
         None,
         "pas de réveil pour une erreur sans fin"
     );
-    a.notifications.push(
-        "Quick restart disabled in long tests. Use shift + tab.",
-        fasttype_tui::view::notify::Level::Notice,
-        100_000.0,
+    let (buf, _) = render(&mut a, 120, 30);
+    assert!(
+        screen_text(&buf).contains("klingon"),
+        "visible hors de la frappe"
     );
+    // pendant la frappe, le site cache toutes les notifications non importantes
     let first: String = a.session().word(0).chars().take(1).collect();
     type_text(&mut a, &first, 100_000.0, 10.0);
     let (buf, _) = render(&mut a, 120, 30);
-    let text = screen_text(&buf);
-    assert!(text.contains("klingon"), "l'erreur reste visible");
+    assert!(!screen_text(&buf).contains("klingon"), "rien sur les mots");
     assert!(
-        !text.contains("Quick restart"),
-        "la notice se cache pendant la frappe"
+        a.notifications
+            .items()
+            .iter()
+            .any(|n| n.text.contains("klingon")),
+        "toujours là, seulement cachée"
     );
+}
+
+#[test]
+fn importing_something_that_is_not_toml_changes_nothing() {
+    let mut a = app("ex-import-bad", "time = 60\ntheme = \"dracula\"\n");
+    command(&mut a, "import", 0.0);
+    a.handle(Input::Paste("{\"time\": 15}".into()));
+    a.handle(press(Key::Enter, 0.0));
+    assert_eq!(a.store.config.int("time"), 60, "réglages intacts");
+    assert_eq!(a.store.config.str("theme"), "dracula");
+    let dir =
+        std::env::temp_dir().join(format!("fasttype-tui-{}-ex-import-bad", std::process::id()));
+    let saved = std::fs::read_to_string(dir.join("config/config.toml")).unwrap();
+    assert!(saved.contains("time = 60"), "rien d'écrit : {saved}");
+    let texts: Vec<&str> = a
+        .notifications
+        .items()
+        .iter()
+        .map(|n| n.text.as_str())
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.starts_with("Failed to import settings")),
+        "{texts:?}"
+    );
+    assert!(!texts.contains(&"Settings imported"));
+}
+
+#[test]
+fn a_chosen_quote_is_kept_after_a_relaunch() {
+    let mut a = app("ex-quote-keep", "");
+    command(&mut a, "search quotes", 0.0);
+    let id = match &a.command_line().unwrap().shown().0[7].action {
+        fasttype_tui::palette::Action::App(fasttype_tui::palette::AppAction::SelectQuote(id)) => {
+            *id
+        }
+        other => panic!("{other:?}"),
+    };
+    for _ in 0..7 {
+        a.handle(press(Key::Down, 0.0));
+    }
+    a.handle(press(Key::Enter, 0.0));
+    settle(&mut a, 0.0);
+    assert_eq!(a.session().spec().quote.as_ref().unwrap().id, id);
+    let dir =
+        std::env::temp_dir().join(format!("fasttype-tui-{}-ex-quote-keep", std::process::id()));
+    let reopened = App::new(
+        fasttype_store::Store::open(common::paths(&dir)),
+        ColorMode::TrueColor,
+        0.0,
+        99,
+    );
+    assert_eq!(reopened.session().spec().quote.as_ref().unwrap().id, id);
+}
+
+#[test]
+fn quote_search_reads_the_whole_quote() {
+    let mut a = app("ex-quote-long", "");
+    command(&mut a, "search quotes", 0.0);
+    let file = fasttype_data::quotes_for("english").unwrap().unwrap();
+    let (shown, _) = a.command_line().unwrap().shown();
+    let long = shown
+        .iter()
+        .find(|c| c.display.ends_with('…'))
+        .expect("une citation coupée à l'affichage");
+    let id = match long.action {
+        fasttype_tui::palette::Action::App(fasttype_tui::palette::AppAction::SelectQuote(id)) => id,
+        _ => unreachable!(),
+    };
+    let text = &file.quotes.iter().find(|q| q.id == id).unwrap().text;
+    let last = fasttype_tui::palette::filter::split_words(text)
+        .pop()
+        .unwrap();
+    assert!(long.words.contains(&last), "« {last} » cherchable");
 }
