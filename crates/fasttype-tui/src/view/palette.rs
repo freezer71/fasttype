@@ -3,7 +3,7 @@
 //! (`bg-text text-bg`), les autres en `sub`, une coche devant la valeur en cours.
 
 use crate::palette::state::PaletteState;
-use crate::theme::Palette;
+use crate::theme::{ColorMode, Palette, to_color, xterm_rgb};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -16,6 +16,11 @@ pub const MAX_ROWS: u16 = 12;
 pub fn dim_color(c: Color) -> Color {
     match c {
         Color::Rgb(r, g, b) => Color::Rgb(r / 2, g / 2, b / 2),
+        // 256 couleurs : assombrie en RGB, puis la plus proche des 256
+        Color::Indexed(i) => {
+            let (r, g, b) = xterm_rgb(i);
+            to_color((r / 2, g / 2, b / 2), ColorMode::Ansi256)
+        }
         other => other,
     }
 }
@@ -75,8 +80,18 @@ fn fit(text: &str, width: usize) -> String {
 }
 
 /// Dessine la palette ; renvoie la position du curseur de saisie.
-pub fn render(buf: &mut Buffer, area: Rect, state: &PaletteState, p: &Palette) -> (u16, u16) {
-    dim(buf, area);
+/// `veil` : assombrir l'écran derrière ; non pendant l'aperçu d'un thème,
+/// qu'on doit voir avec ses vraies couleurs (`removeCommandlineBackground`).
+pub fn render(
+    buf: &mut Buffer,
+    area: Rect,
+    state: &PaletteState,
+    p: &Palette,
+    veil: bool,
+) -> (u16, u16) {
+    if veil {
+        dim(buf, area);
+    }
     let r = palette_rect(area, state);
     let back = Style::default().bg(p.bg);
     for y in r.top()..r.bottom() {

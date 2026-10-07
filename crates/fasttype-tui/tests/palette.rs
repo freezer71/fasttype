@@ -284,3 +284,52 @@ fn palette_keys_are_mapped() {
         Some(Input::Paste("a\nb".into()))
     );
 }
+
+#[test]
+fn typing_replaces_the_prefilled_value() {
+    let a = app("pal-replace", "");
+    let c = &a.store.config;
+    let mut p = PaletteState::open(ctx_root(c, false, false));
+    "time".chars().for_each(|ch| {
+        p.key(Key::Char(ch), c);
+    });
+    p.key(Key::Enter, c);
+    p.key(Key::Up, c);
+    p.key(Key::Up, c);
+    p.key(Key::Enter, c);
+    assert_eq!(p.input().unwrap().text, "30");
+    assert!(
+        p.input().unwrap().selected,
+        "valeur pré-remplie sélectionnée"
+    );
+    p.key(Key::Char('4'), c);
+    p.key(Key::Char('5'), c);
+    assert_eq!(
+        p.key(Key::Enter, c),
+        Outcome::Run(Action::Set {
+            key: "time",
+            value: Value::Integer(45)
+        }),
+        "comme sur le site : la frappe remplace la valeur"
+    );
+}
+
+#[test]
+fn aliases_from_the_site() {
+    let a = app("pal-alias", "");
+    let c = &a.store.config;
+    let find = |q: &str, on_result: bool| -> Vec<String> {
+        let mut p = PaletteState::open(ctx_root(c, on_result, false));
+        q.chars().for_each(|ch| {
+            p.key(Key::Char(ch), c);
+        });
+        p.shown().0.iter().map(|c| c.display.clone()).collect()
+    };
+    assert_eq!(find("words", false), ["Word count..."]);
+    assert_eq!(find("quotes", false), ["Quote length..."]);
+    assert!(find("wpm", false).contains(&"Live speed style...".to_string()));
+    assert!(find("timer", false).contains(&"Live progress style...".to_string()));
+    assert!(find("page", false).contains(&"Max line width...".to_string()));
+    assert!(find("restart", true).contains(&"Next test".to_string()));
+    assert!(find("opacity", false).contains(&"Live progress opacity...".to_string()));
+}

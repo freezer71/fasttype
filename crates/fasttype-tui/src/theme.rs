@@ -181,8 +181,30 @@ fn oklab(r: u8, g: u8, b: u8) -> [f64; 3] {
     ]
 }
 
-/// RGB d'une couleur xterm 16..=255 (cube 6×6×6 puis 24 gris).
-fn xterm_rgb(index: u8) -> (u8, u8, u8) {
+/// RGB d'une couleur xterm : les 16 de base (valeurs par défaut d'xterm),
+/// puis le cube 6×6×6 et les 24 gris.
+pub fn xterm_rgb(index: u8) -> (u8, u8, u8) {
+    const BASE: [(u8, u8, u8); 16] = [
+        (0, 0, 0),
+        (205, 0, 0),
+        (0, 205, 0),
+        (205, 205, 0),
+        (0, 0, 238),
+        (205, 0, 205),
+        (0, 205, 205),
+        (229, 229, 229),
+        (127, 127, 127),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (92, 92, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
+    ];
+    if index < 16 {
+        return BASE[usize::from(index)];
+    }
     const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
     if index >= 232 {
         let v = 8 + 10 * (index - 232);

@@ -237,3 +237,63 @@ fn a_test_that_ends_behind_the_command_line_keeps_it_usable() {
     a.handle(press(Key::Esc, 15_100.0));
     assert!(a.command_line().is_none());
 }
+
+#[test]
+fn the_screen_is_dimmed_in_256_colours_too() {
+    use fasttype_tui::theme::ColorMode;
+    let store = common::store_with("cl-256", "");
+    let mut a = App::new(store, ColorMode::Ansi256, 0.0, 1);
+    let (before, _) = render(&mut a, 100, 30);
+    a.handle(press(Key::Esc, 0.0));
+    let (after, _) = render(&mut a, 100, 30);
+    assert_ne!(after[(0, 0)].bg, before[(0, 0)].bg, "voile en 256 couleurs");
+}
+
+#[test]
+fn a_previewed_theme_is_not_dimmed() {
+    let mut a = app("cl-preview-light", "");
+    a.handle(press(Key::Esc, 0.0));
+    type_query(&mut a, "theme", 0.0);
+    a.handle(press(Key::Enter, 0.0));
+    a.handle(press(Key::Down, 0.0));
+    let (buf, _) = render(&mut a, 100, 30);
+    assert_eq!(
+        buf[(0, 29)].bg,
+        a.palette().bg,
+        "le thème survolé, sans voile"
+    );
+}
+
+#[test]
+fn tab_then_the_command_line_disarms_the_restart() {
+    let mut a = app("cl-armed", "");
+    type_text(&mut a, "x", 0.0, 50.0);
+    a.handle(press(Key::Tab, 100.0));
+    a.handle(press(Key::Esc, 110.0));
+    a.handle(press(Key::Esc, 120.0));
+    a.handle(press(Key::Enter, 130.0));
+    assert_eq!(a.transition(), None, "pas de restart surprise");
+    assert_eq!(a.session().state(), SessionState::Running);
+}
+
+#[test]
+fn choosing_the_current_value_still_restarts_and_theme_leaves_custom_colours() {
+    let mut a = app("cl-same", "");
+    a.handle(press(Key::Esc, 0.0));
+    type_query(&mut a, "time", 0.0);
+    a.handle(press(Key::Enter, 0.0));
+    a.handle(press(Key::Enter, 0.0));
+    assert!(
+        a.transition().is_some(),
+        "time 30 choisi à nouveau : restart"
+    );
+    let mut a = app("cl-custom-theme", "custom_theme = true\n");
+    a.handle(press(Key::Esc, 0.0));
+    type_query(&mut a, "theme", 0.0);
+    a.handle(press(Key::Enter, 0.0));
+    a.handle(press(Key::Enter, 0.0));
+    assert!(
+        !a.store.config.bool("customTheme"),
+        "le thème choisi remplace le thème custom"
+    );
+}

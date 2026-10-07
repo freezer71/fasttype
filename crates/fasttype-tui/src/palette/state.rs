@@ -28,6 +28,9 @@ pub struct InputMode {
     pub text: String,
     /// Message sous la saisie quand la valeur est refusée.
     pub error: Option<String>,
+    /// La valeur pré-remplie est sélectionnée : la première frappe la remplace
+    /// (`setSelectionRange(0, len)` du site).
+    pub selected: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +172,9 @@ impl PaletteState {
             .collect();
         match &mut self.input {
             Some(m) => {
+                if std::mem::take(&mut m.selected) {
+                    m.text.clear();
+                }
                 m.text.push_str(&flat);
                 m.error = None;
             }
@@ -235,6 +241,7 @@ impl PaletteState {
                             title: cmd.display.clone(),
                             text: current_text(config, key),
                             error: None,
+                            selected: true,
                         });
                         Outcome::Stay
                     }
@@ -248,6 +255,11 @@ impl PaletteState {
 
     fn input_key(&mut self, key: Key) -> Outcome {
         let m = self.input.as_mut().expect("mode saisie");
+        // texte sélectionné : une lettre le remplace, un effacement le vide
+        if m.selected && matches!(key, Key::Char(_) | Key::Backspace | Key::DeleteWord) {
+            m.text.clear();
+        }
+        m.selected = false;
         match key {
             Key::Esc => {
                 self.input = None;

@@ -37,6 +37,7 @@ use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use std::collections::HashSet;
+use toml::Value;
 use unicode_width::UnicodeWidthStr;
 
 /// Réglages qui changent le test : le changer relance un test (`afterExec: restart`).
@@ -392,6 +393,8 @@ impl App {
             themes: &themes,
         };
         self.command_line = Some(PaletteState::open(lists::root(&ctx)));
+        // la palette prend le focus : un Tab d'avant ne relance plus avec Entrée
+        self.restart_armed = None;
     }
 
     fn close_palette(&mut self) {
@@ -442,6 +445,10 @@ impl App {
         match action {
             Action::Set { key, value } => match self.store.config.set(key, value) {
                 Ok(changed) => {
+                    // comme `overrideConfig` du site, même si la valeur ne change pas
+                    if key == "theme" {
+                        let _ = self.store.config.set("customTheme", Value::Boolean(false));
+                    }
                     if let Err(e) = self.store.save_config() {
                         self.notifications.push(
                             format!("could not save the settings: {e}"),
@@ -449,7 +456,10 @@ impl App {
                             now,
                         );
                     }
-                    if changed.iter().any(|k| RESTART_KEYS.contains(k)) {
+                    // `afterExec: restart` : même si la valeur ne change pas
+                    if RESTART_KEYS.contains(&key)
+                        || changed.iter().any(|k| RESTART_KEYS.contains(k))
+                    {
                         self.try_restart(now, true);
                     }
                 }
@@ -990,7 +1000,9 @@ impl App {
         .render(buf, area);
         self.notifications.render(buf, area, &self.palette);
         if let Some(p) = &self.command_line {
-            cursor = Some(palette_view::render(buf, area, p, &self.palette));
+            // pendant l'aperçu d'un thème, pas de voile : ses vraies couleurs
+            let veil = self.saved_palette.is_none();
+            cursor = Some(palette_view::render(buf, area, p, &self.palette, veil));
             // la boîte recouvre les mots agrandis : ratatui la redessine toujours,
             // et la zone agrandie la contourne
             let boxed = palette_view::palette_rect(area, p);
@@ -1001,9 +1013,11 @@ impl App {
             }
             if let Some(st) = &mut self.scaled {
                 st.hole = Some(boxed);
-                st.bg = palette_view::dim_color(st.bg);
-                for c in &mut st.cells {
-                    c.style = palette_view::dim_style(c.style);
+                if veil {
+                    st.bg = palette_view::dim_color(st.bg);
+                    for c in &mut st.cells {
+                        c.style = palette_view::dim_style(c.style);
+                    }
                 }
             }
             self.caret_frame = None;

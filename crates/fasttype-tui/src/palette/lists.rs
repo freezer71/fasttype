@@ -52,6 +52,7 @@ const SHOW_HIDE: &[&str] = &["showKeyTips"];
 fn label(key: &str) -> String {
     let display = match key {
         "timerColor" => "live progress color",
+        "timerOpacity" => "live progress opacity",
         "showKeyTips" => "key tips",
         "words" => "word count",
         other => key_def(other).map_or(other, |d| d.display),
@@ -152,13 +153,26 @@ fn values(key: &'static str, ctx: &Context) -> Vec<Command> {
     list
 }
 
+/// Alias de recherche du site (`commandline-metadata.ts`).
+fn alias(key: &str) -> &'static str {
+    match key {
+        "words" => "words",
+        "quoteLength" => "quotes",
+        "liveSpeedStyle" | "liveAccStyle" | "liveBurstStyle" => "wpm",
+        "timerStyle" => "timer",
+        "timerColor" | "timerOpacity" => "timer speed wpm burst acc",
+        "maxLineWidth" => "page",
+        _ => "",
+    }
+}
+
 /// Commande d'une clé : sous-groupe de ses valeurs, ou saisie directe pour
 /// les nombres libres (`fontSize`, `maxLineWidth`).
 fn key_command(key: &'static str, ctx: &Context) -> Command {
     let title = label(key);
     let list = values(key, ctx);
     if list.is_empty() {
-        return Command::new(title, Action::Input { key });
+        return Command::new(title, Action::Input { key }).alias(alias(key));
     }
     Command::new(
         title.clone(),
@@ -167,12 +181,16 @@ fn key_command(key: &'static str, ctx: &Context) -> Command {
             list,
         }),
     )
+    .alias(alias(key))
 }
 
 pub fn root(ctx: &Context) -> Subgroup {
     let mut list = Vec::new();
     if ctx.on_result {
-        list.push(Command::new("Next test", Action::App(AppAction::NextTest)));
+        list.push(
+            Command::new("Next test", Action::App(AppAction::NextTest))
+                .alias("restart start begin type test typing"),
+        );
         list.push(Command::new(
             "Repeat test",
             Action::App(AppAction::RepeatTest),
