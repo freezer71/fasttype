@@ -973,8 +973,6 @@ pub fn parse_themes_ts(src: &str) -> Result<Vec<Theme>, ThemeParseError> {
 }
 ```
 
-Note : la closure `color` emprunte `fields` en mutable. Le tableau `[0..9].map(...)` est évalué en entier avant la construction du `Theme`, et l'emprunt prend fin avant `fields.remove("hasCss")`. Si le vérificateur d'emprunts refuse cette forme, extraire les dix couleurs dans un `Vec<Rgba>` avec une boucle `for key in COLORS`, puis les déstructurer. Le comportement attendu reste le même.
-
 - [ ] **Step 4 : lancer les tests**
 
 Run: `cargo fmt && cargo test -p fasttype-data --test themes && cargo clippy --workspace --all-targets -- -D warnings`
