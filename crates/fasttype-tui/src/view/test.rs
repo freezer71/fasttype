@@ -117,6 +117,7 @@ impl WordsView<'_> {
             region,
             bg: self.palette.bg,
             cells,
+            hole: None,
         })
     }
 
@@ -181,7 +182,32 @@ pub struct Chrome<'a> {
     pub opacity: f64,
     /// Haut de la zone de mots : la barre n'y descend jamais (une ligne libre au-dessus).
     pub words_top: Option<u16>,
-    pub tips: &'a str,
+}
+
+/// Raccourcis du pied de page selon `quickRestart` : touches de restart, puis
+/// touche de la palette (Tab quand Échap relance). Chaque segment : (texte, touche ?).
+pub fn key_tips(config: &Config) -> Vec<(String, bool)> {
+    let quick = config.str("quickRestart");
+    let restart: &[&str] = match quick {
+        "tab" => &["tab"],
+        "esc" => &["esc"],
+        "enter" => &["enter"],
+        _ => &["tab", "enter"],
+    };
+    let mut tips = Vec::new();
+    for (i, k) in restart.iter().enumerate() {
+        if i > 0 {
+            tips.push((" + ".to_string(), false));
+        }
+        tips.push((k.to_string(), true));
+    }
+    tips.push((" - restart   ".to_string(), false));
+    tips.push((
+        (if quick == "esc" { "tab" } else { "esc" }).to_string(),
+        true,
+    ));
+    tips.push((" - command line".to_string(), false));
+    tips
 }
 
 impl Chrome<'_> {
@@ -203,12 +229,12 @@ impl Chrome<'_> {
         }
         let key = Style::default().fg(p.sub_alt).bg(p.sub);
         let text = Style::default().fg(p.sub);
-        let tips = [
-            ("tab".to_string(), key),
-            (" + ".to_string(), text),
-            ("enter".to_string(), key),
-            (format!(" - {}", self.tips), text),
-        ];
-        centered_segments(buf, area, area.bottom().saturating_sub(2), &tips);
+        if self.config.bool("showKeyTips") {
+            let tips: Vec<(String, Style)> = key_tips(self.config)
+                .into_iter()
+                .map(|(t, is_key)| (t, if is_key { key } else { text }))
+                .collect();
+            centered_segments(buf, area, area.bottom().saturating_sub(2), &tips);
+        }
     }
 }

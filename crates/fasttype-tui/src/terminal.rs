@@ -4,7 +4,8 @@
 use crate::app::{CaretLook, CaretShape};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -168,6 +169,7 @@ pub fn restore() {
         out,
         SetCursorStyle::DefaultUserShape,
         crossterm::cursor::Show,
+        DisableBracketedPaste,
         LeaveAlternateScreen
     );
     // OSC 112 : couleur du curseur par défaut
@@ -193,7 +195,7 @@ impl TerminalGuard {
         // le garde existe dès le mode raw : si la suite échoue, son `drop` restaure
         let guard = TerminalGuard;
         let mut out = io::stdout();
-        execute!(out, EnterAlternateScreen)?;
+        execute!(out, EnterAlternateScreen, EnableBracketedPaste)?;
         // avant toute autre lecture de l'entrée (protocole clavier, thread clavier)
         let graphics = probe(&mut out, crate::kitty::PROBE, crate::kitty::probe_answer)?;
         GRAPHICS.store(graphics, Ordering::SeqCst);

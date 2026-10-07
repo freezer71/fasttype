@@ -43,6 +43,7 @@ fn scaled_text_clears_the_region_then_writes_each_letter() {
                 .fg(Color::Rgb(9, 9, 9))
                 .bg(Color::Rgb(1, 2, 3)),
         }],
+        hole: None,
     };
     let mut out = Vec::new();
     t.write(&mut out).unwrap();
@@ -69,6 +70,7 @@ fn text(cells: Vec<ScaledCell>) -> ScaledText {
         region: Rect::new(0, 10, 20, 2),
         bg: Color::Rgb(1, 2, 3),
         cells,
+        hole: None,
     }
 }
 

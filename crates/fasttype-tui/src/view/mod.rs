@@ -5,6 +5,7 @@ pub mod chart;
 pub mod config_bar;
 pub mod live;
 pub mod notify;
+pub mod palette;
 pub mod result;
 pub mod test;
 

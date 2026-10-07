@@ -41,6 +41,11 @@ impl Notifications {
         self.items.truncate(5);
     }
 
+    /// « Clear all notifications ».
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
     pub fn expire(&mut self, now: f64) {
         self.items.retain(|n| n.until > now);
     }

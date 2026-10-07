@@ -13,6 +13,8 @@ use crate::caret::{
 use crate::input::{Input, Key, Phase};
 use crate::kitty::CaretRenderer;
 use crate::layout::{Layout, char_width, layout_window, letters};
+use crate::palette::state::{Outcome, PaletteState};
+use crate::palette::{Action, AppAction, lists, lists::Context};
 use crate::perf::Perf;
 use crate::session_factory::SessionFactory;
 use crate::sized::{ScaledCell, ScaledText, scale_for};
@@ -20,6 +22,7 @@ use crate::theme::{ColorMode, Palette, Rgb, mix};
 use crate::view::config_bar::bar_layout;
 use crate::view::live::{LiveItem, LiveStats, Style3, WordsBox, render_bar, seconds_to_string};
 use crate::view::notify::{Level, Notifications};
+use crate::view::palette as palette_view;
 use crate::view::result::{ResultView, invalid_label, unit_factor};
 use crate::view::test::{Chrome, WordsView, words_box};
 use crate::view::{MIN_HEIGHT, MIN_WIDTH, fill_background, too_small};
@@ -35,6 +38,31 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
+
+/// Réglages qui changent le test : le changer relance un test (`afterExec: restart`).
+const RESTART_KEYS: &[&str] = &[
+    "mode",
+    "time",
+    "words",
+    "quoteLength",
+    "language",
+    "punctuation",
+    "numbers",
+];
+
+/// `canBailOut` (lists/bail-out.ts) : tests longs, infinis ou zen.
+fn can_bail_out(spec: &fasttype_core::spec::TestSpec) -> bool {
+    use fasttype_core::spec::CustomLimit;
+    let big = |n: u32, threshold: u32| n == 0 || n >= threshold;
+    match (spec.mode, spec.custom_limit) {
+        (Mode::Zen, _) => true,
+        (Mode::Time, _) => big(spec.time_limit.unwrap_or(0), 3600),
+        (Mode::Words, _) => big(spec.mode2.parse().unwrap_or(0), 5000),
+        (Mode::Custom, Some(CustomLimit::Time(s))) => big(s, 3600),
+        (Mode::Custom, Some(CustomLimit::Word(n) | CustomLimit::Section(n))) => big(n, 5000),
+        _ => false,
+    }
+}
 
 /// Durée des fondus (test, résultat, restart, stats en direct, focus mode).
 pub const FADE_MS: f64 = 125.0;
@@ -131,6 +159,13 @@ pub struct App {
     last_scaled_region: Option<Rect>,
     /// Haut de la zone de mots du dernier dessin (la barre de config reste au-dessus).
     words_top: Option<u16>,
+    /// Palette de commandes ouverte.
+    command_line: Option<PaletteState>,
+    /// Palette du thème en cours, gardée pendant l'aperçu d'un autre thème.
+    saved_palette: Option<Palette>,
+    color_mode: ColorMode,
+    /// Le prochain restart rejoue le même texte (« Repeat test »).
+    repeat_next: bool,
     /// Avertissements déjà montrés : un repli n'est signalé qu'une fois.
     warned: HashSet<String>,
 }
@@ -263,6 +298,10 @@ impl App {
             scaled: None,
             last_scaled_region: None,
             words_top: None,
+            command_line: None,
+            saved_palette: None,
+            color_mode,
+            repeat_next: false,
             warned: HashSet::new(),
             store,
         };
@@ -331,6 +370,110 @@ impl App {
         }
     }
 
+    /// La palette est ouverte.
+    pub fn command_line(&self) -> Option<&PaletteState> {
+        self.command_line.as_ref()
+    }
+
+    /// Ouvre la palette sur la liste racine.
+    fn open_palette(&mut self) {
+        let languages = fasttype_data::language_names().unwrap_or_default();
+        let themes: Vec<&str> = fasttype_data::themes()
+            .map(|t| t.iter().map(|t| t.name.as_str()).collect())
+            .unwrap_or_default();
+        let spec = self.session.spec();
+        let running =
+            matches!(self.screen, Screen::Test) && self.session.state() == SessionState::Running;
+        let ctx = Context {
+            config: &self.store.config,
+            on_result: matches!(self.screen, Screen::Result(_)),
+            can_bail_out: running && can_bail_out(spec),
+            languages: &languages,
+            themes: &themes,
+        };
+        self.command_line = Some(PaletteState::open(lists::root(&ctx)));
+    }
+
+    fn close_palette(&mut self) {
+        self.command_line = None;
+        self.preview_theme(None);
+    }
+
+    fn palette_key(&mut self, key: Key, now: f64) {
+        let Some(p) = &mut self.command_line else {
+            return;
+        };
+        match p.key(key, &self.store.config) {
+            Outcome::Stay => {
+                let hovered = p.hovered().and_then(|c| c.preview.clone());
+                self.preview_theme(hovered.as_deref());
+            }
+            Outcome::Close => self.close_palette(),
+            Outcome::Run(action) => {
+                self.command_line = None;
+                self.saved_palette = None;
+                self.run(action, now);
+                // un thème survolé mais pas choisi : retour au thème de la config
+                self.palette =
+                    Palette::from_theme(&resolve_theme(&self.store.config).0, self.color_mode);
+            }
+        }
+    }
+
+    /// Aperçu d'un thème au survol ; `None` remet le thème en cours.
+    fn preview_theme(&mut self, name: Option<&str>) {
+        match name.and_then(theme) {
+            Some(t) => {
+                if self.saved_palette.is_none() {
+                    self.saved_palette = Some(self.palette);
+                }
+                self.palette = Palette::from_theme(t, self.color_mode);
+            }
+            None => {
+                if let Some(p) = self.saved_palette.take() {
+                    self.palette = p;
+                }
+            }
+        }
+    }
+
+    /// Exécute une commande de la palette.
+    fn run(&mut self, action: Action, now: f64) {
+        match action {
+            Action::Set { key, value } => match self.store.config.set(key, value) {
+                Ok(changed) => {
+                    if let Err(e) = self.store.save_config() {
+                        self.notifications.push(
+                            format!("could not save the settings: {e}"),
+                            Level::Error,
+                            now,
+                        );
+                    }
+                    if changed.iter().any(|k| RESTART_KEYS.contains(k)) {
+                        self.try_restart(now, true);
+                    }
+                }
+                Err(_) => {
+                    self.notifications
+                        .push(format!("invalid value for {key}"), Level::Error, now)
+                }
+            },
+            Action::App(AppAction::NextTest) => self.try_restart(now, true),
+            Action::App(AppAction::RepeatTest) => {
+                self.repeat_next = true;
+                self.try_restart(now, true);
+            }
+            Action::App(AppAction::BailOut) => {
+                self.session.bail_out(now);
+                self.check_finished(now);
+            }
+            Action::App(AppAction::ClearNotifications) => self.notifications.clear(),
+            Action::App(AppAction::Quit) => self.quit = true,
+            Action::Open(_) | Action::Input { .. } | Action::Close => {}
+        }
+        self.update_motion(now);
+    }
+
     fn caret_style(&self) -> CaretStyle {
         CaretStyle::from_config(self.store.config.str("caretStyle"))
     }
@@ -345,7 +488,12 @@ impl App {
         if let Some(w) = built.warning {
             self.warn(w, now);
         }
-        self.session = built.session;
+        let previous = std::mem::replace(&mut self.session, built.session);
+        if std::mem::take(&mut self.repeat_next)
+            && let Some(again) = previous.into_repeat()
+        {
+            self.session = again;
+        }
         self.screen = Screen::Test;
         self.restart_armed = None;
         self.window = Window::default();
@@ -413,6 +561,12 @@ impl App {
             self.quit = true;
             return;
         }
+        if let Input::Paste(text) = &input {
+            if let Some(p) = &mut self.command_line {
+                p.paste(text);
+            }
+            return;
+        }
         let Input::Key {
             key,
             phase,
@@ -441,12 +595,27 @@ impl App {
         ) {
             return;
         }
+        if self.command_line.is_some() {
+            self.palette_key(key, at);
+            return;
+        }
+        let quick = self.store.config.str("quickRestart");
+        // la palette s'ouvre avec Échap, ou Tab quand Échap relance (`hotkeys.ts`)
+        let opens = match key {
+            Key::Palette => true,
+            Key::Esc => quick != "esc",
+            Key::Tab => quick == "esc",
+            _ => false,
+        };
+        if opens {
+            self.open_palette();
+            return;
+        }
         self.input_at = at;
         // En zen, Entrée insère un saut de ligne et Shift+Entrée termine le test :
         // ni l'une ni l'autre ne relance.
         let zen = self.session.spec().mode == Mode::Zen && matches!(self.screen, Screen::Test);
         let has_newlines = zen || self.session.has_newlines();
-        let quick = self.store.config.str("quickRestart");
         let is_quick = match (quick, key) {
             ("tab", Key::Tab | Key::BackTab) | ("esc", Key::Esc) => true,
             ("enter", Key::Enter) => !has_newlines,
@@ -614,6 +783,7 @@ impl App {
     fn next_blink_step(&self, now: f64) -> Option<f64> {
         let drawn = matches!(self.screen, Screen::Test)
             && self.transition.is_none()
+            && self.command_line.is_none()
             && (matches!(self.renderer, CaretRenderer::Kitty(_))
                 || self.caret_style() == CaretStyle::Block);
         let since = self.caret.blink_since().filter(|_| drawn)?;
@@ -816,10 +986,28 @@ impl App {
             config: &self.store.config,
             opacity: chrome_opacity,
             words_top: self.words_top,
-            tips: "restart",
         }
         .render(buf, area);
         self.notifications.render(buf, area, &self.palette);
+        if let Some(p) = &self.command_line {
+            cursor = Some(palette_view::render(buf, area, p, &self.palette));
+            // la boîte recouvre les mots agrandis : ratatui la redessine toujours,
+            // et la zone agrandie la contourne
+            let boxed = palette_view::palette_rect(area, p);
+            for y in boxed.top()..boxed.bottom() {
+                for x in boxed.left()..boxed.right() {
+                    buf[(x, y)].set_diff_option(CellDiffOption::AlwaysUpdate);
+                }
+            }
+            if let Some(st) = &mut self.scaled {
+                st.hole = Some(boxed);
+                st.bg = palette_view::dim_color(st.bg);
+                for c in &mut st.cells {
+                    c.style = palette_view::dim_style(c.style);
+                }
+            }
+            self.caret_frame = None;
+        }
         if let Some(p) = perf {
             buf.set_string(
                 area.x + 1,

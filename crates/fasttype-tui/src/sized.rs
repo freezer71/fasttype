@@ -64,6 +64,8 @@ pub struct ScaledText {
     /// Fond de la zone (couleur `bg` du thème).
     pub bg: Color,
     pub cells: Vec<ScaledCell>,
+    /// Partie de la zone recouverte par la palette : ni effacée ni écrite.
+    pub hole: Option<Rect>,
 }
 
 fn color(out: &mut Vec<u8>, base: u8, c: Color) {
@@ -103,11 +105,29 @@ impl ScaledText {
         let mut buf = Vec::with_capacity(64 * self.cells.len() + 8 * self.region.area() as usize);
         buf.extend_from_slice(b"\x1b7");
         sgr(&mut buf, &Style::default().bg(self.bg));
-        let blank = " ".repeat(usize::from(self.region.width));
-        for y in self.region.top()..self.region.bottom() {
-            let _ = write!(buf, "\x1b[{};{}H{blank}", y + 1, self.region.x + 1);
+        let r = self.region;
+        let hole = self
+            .hole
+            .map(|h| h.intersection(r))
+            .filter(|h| !h.is_empty());
+        for y in r.top()..r.bottom() {
+            // segments de la ligne hors de la palette
+            let spans = match hole {
+                Some(h) if y >= h.top() && y < h.bottom() => {
+                    vec![(r.left(), h.left()), (h.right(), r.right())]
+                }
+                _ => vec![(r.left(), r.right())],
+            };
+            for (a, b) in spans.into_iter().filter(|(a, b)| a < b) {
+                let blank = " ".repeat(usize::from(b - a));
+                let _ = write!(buf, "\x1b[{};{}H{blank}", y + 1, a + 1);
+            }
         }
         for c in &self.cells {
+            let block = Rect::new(c.x, c.y, self.scale, self.scale);
+            if hole.is_some_and(|h| h.intersects(block)) {
+                continue;
+            }
             put(&mut buf, self.scale, c);
         }
         buf.extend_from_slice(b"\x1b[0m\x1b8");
@@ -116,23 +136,35 @@ impl ScaledText {
 
     /// N'écrit que ce qui a changé depuis `prev` : une lettre nouvelle ou
     /// modifiée remplace l'ancienne (même case haut-gauche), une lettre partie
-    /// est effacée. Tout est réécrit si la zone, l'échelle ou le fond changent.
+    /// est effacée. Tout est réécrit si la zone, l'échelle, le fond ou la
+    /// partie recouverte par la palette changent.
     pub fn write_changes(&self, prev: Option<&ScaledText>, out: &mut impl Write) -> io::Result<()> {
-        let Some(prev) =
-            prev.filter(|p| p.region == self.region && p.scale == self.scale && p.bg == self.bg)
-        else {
+        let Some(prev) = prev.filter(|p| {
+            p.region == self.region
+                && p.scale == self.scale
+                && p.bg == self.bg
+                && p.hole == self.hole
+        }) else {
             return self.write(out);
         };
         let old: std::collections::HashMap<(u16, u16), &ScaledCell> =
             prev.cells.iter().map(|c| ((c.x, c.y), c)).collect();
         let new: std::collections::HashSet<(u16, u16)> =
             self.cells.iter().map(|c| (c.x, c.y)).collect();
+        let hole = self.hole;
+        let covered = |c: &ScaledCell| {
+            hole.is_some_and(|h| h.intersects(Rect::new(c.x, c.y, self.scale, self.scale)))
+        };
         let mut buf = Vec::new();
         buf.extend_from_slice(b"\x1b7");
         // lettres parties : effacer leur bloc
         let blank = " ".repeat(usize::from(self.scale));
         let mut cleared = false;
-        for c in prev.cells.iter().filter(|c| !new.contains(&(c.x, c.y))) {
+        for c in prev
+            .cells
+            .iter()
+            .filter(|c| !new.contains(&(c.x, c.y)) && !covered(c))
+        {
             if !cleared {
                 sgr(&mut buf, &Style::default().bg(self.bg));
                 cleared = true;
@@ -142,9 +174,10 @@ impl ScaledText {
             }
         }
         for c in &self.cells {
-            if old
-                .get(&(c.x, c.y))
-                .is_none_or(|o| o.ch != c.ch || o.style != c.style)
+            if !covered(c)
+                && old
+                    .get(&(c.x, c.y))
+                    .is_none_or(|o| o.ch != c.ch || o.style != c.style)
             {
                 put(&mut buf, self.scale, c);
             }

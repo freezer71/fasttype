@@ -1,9 +1,10 @@
 """Lance fasttype dans un pseudo-terminal, tape un test custom complet, quitte.
-Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sized] [--silent] [--sigterm]
+Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sized] [--silent] [--palette] [--sigterm]
   --kitty    le terminal répond OK à la sonde graphique Kitty (cases de 10 × 20 pixels)
   --sized    le terminal agrandit le texte (OSC 66, Kitty ≥ 0.40)
   --silent   le terminal ne répond à aucune sonde (ni position, ni DA1) : chaque
              sonde doit abandonner au bout de 300 ms
+  --palette  quitte par la palette de commandes (Échap, « quit », Entrée)
   --sigterm  quitte par SIGTERM au lieu de Ctrl+C"""
 import fcntl, os, pty, re, select, signal, struct, sys, termios, time
 
@@ -11,6 +12,7 @@ binary, home = sys.argv[1], sys.argv[2]
 flags = sys.argv[3:]
 perf, kitty, sigterm = "--perf" in flags, "--kitty" in flags, "--sigterm" in flags
 sized, silent = "--sized" in flags, "--silent" in flags
+palette = "--palette" in flags
 probe_at, keyboard_at = None, None
 os.makedirs(f"{home}/.config/fasttype", exist_ok=True)
 with open(f"{home}/.config/fasttype/config.toml", "w") as f:
@@ -77,6 +79,15 @@ pump(0.8)
 screen = plain(bytes(out))
 if sigterm:
     os.kill(pid, signal.SIGTERM)
+elif palette:
+    os.write(fd, b"\x1b")
+    pump(0.3)
+    for ch in "quit":
+        os.write(fd, ch.encode())
+        pump(0.05)
+    pump(0.2)
+    palette_seen = "Quit" in plain(bytes(out))
+    os.write(fd, b"\r")
 else:
     os.write(fd, b"\x03")  # Ctrl+C
 pump(1.0)
@@ -86,9 +97,12 @@ print("result screen:", "test type custom english" in screen)
 print("alt screen left:", b"\x1b[?1049l" in out)
 print("sync output used:", b"\x1b[?2026h" in out and b"\x1b[?2026l" in out)
 print("cursor color reset:", b"\x1b]112\x07" in out)
+print("bracketed paste reset:", b"\x1b[?2004l" in out)
 if kitty:
     print("kitty caret placed:", b"\x1b_Ga=p," in out)
     print("kitty images deleted:", out.rstrip().find(b"\x1b_Ga=d,d=A,q=2\x1b\\") > out.find(b"\x1b_Ga=p,"))
+if palette:
+    print("command line shown:", palette_seen)
 if silent:
     wait = (keyboard_at - probe_at) * 1000 if probe_at and keyboard_at else None
     print("probes gave up after (ms):", round(wait) if wait else None)
