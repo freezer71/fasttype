@@ -1,7 +1,12 @@
 use fasttype_tui::caret::{Caret, CaretFrame, CaretStyle, CaretTarget, coverage, smooth_caret_ms};
 
 fn at(x: f64, y: f64) -> CaretTarget {
-    CaretTarget { x, y, width: 1.0 }
+    CaretTarget {
+        x,
+        y,
+        width: 1.0,
+        height: 1.0,
+    }
 }
 
 #[test]
@@ -89,6 +94,7 @@ fn coverage_splits_a_block_between_two_cells() {
         x: 3.25,
         y: 2.0,
         width: 1.0,
+        height: 1.0,
         opacity: 1.0,
         moving: true,
     };

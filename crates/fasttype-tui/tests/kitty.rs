@@ -21,6 +21,7 @@ fn bar(x: f64, y: f64, opacity: f64) -> CaretFrame {
         x,
         y,
         width: 1.0,
+        height: 1.0,
         opacity,
         moving: false,
     }
@@ -123,13 +124,13 @@ fn placement_moves_the_cursor_then_places() {
 #[test]
 fn images_have_monkeytype_proportions() {
     let rgb = (226, 183, 20);
-    let (w, h, px) = caret_image(CaretStyle::Bar, CELL, 1, rgb, 255);
+    let (w, h, px) = caret_image(CaretStyle::Bar, CELL, 1, 1, rgb, 255);
     assert_eq!((w, h), (2, 24), "0,1em de large, toute la hauteur");
     assert_eq!(px.len(), (w * h * 4) as usize);
     assert_eq!(&px[..4], &[226, 183, 20, 255]);
-    let (w, h, _) = caret_image(CaretStyle::Underline, CELL, 2, rgb, 255);
+    let (w, h, _) = caret_image(CaretStyle::Underline, CELL, 2, 1, rgb, 255);
     assert_eq!((w, h), (20, 2), "largeur de la lettre (CJK : 2 cases)");
-    let (w, h, px) = caret_image(CaretStyle::Outline, CELL, 1, rgb, 255);
+    let (w, h, px) = caret_image(CaretStyle::Outline, CELL, 1, 1, rgb, 255);
     assert_eq!((w, h), (10, 24));
     let alpha = |x: u32, y: u32| px[((y * w + x) * 4 + 3) as usize];
     assert_eq!(alpha(0, 5), 255, "bord");
@@ -160,7 +161,7 @@ fn kitty_caret_sends_each_image_once_and_moves_it() {
     k.draw(&mut out, Some(bar(3.5, 2.0, 1.0)), rgb).unwrap();
     let first = String::from_utf8(out.clone()).unwrap();
     assert!(first.contains("a=t"), "transmission");
-    assert!(first.ends_with("\x1b[3;4H\x1b_Ga=p,i=1117,p=1,X=4,Y=0,C=1,q=2\x1b\\"));
+    assert!(first.ends_with("\x1b[3;4H\x1b_Ga=p,i=11117,p=1,X=4,Y=0,C=1,q=2\x1b\\"));
     out.clear();
     k.draw(&mut out, Some(bar(3.6, 2.0, 1.0)), rgb).unwrap();
     let second = String::from_utf8(out.clone()).unwrap();
@@ -171,10 +172,10 @@ fn kitty_caret_sends_each_image_once_and_moves_it() {
     k.draw(&mut out, Some(bar(3.6, 2.0, 0.5)), rgb).unwrap();
     let third = String::from_utf8(out.clone()).unwrap();
     assert!(third.starts_with("\x1b_Ga=t"));
-    assert!(third.contains("\x1b_Ga=d,d=i,i=1117,q=2\x1b\\"));
+    assert!(third.contains("\x1b_Ga=d,d=i,i=11117,q=2\x1b\\"));
     out.clear();
     k.draw(&mut out, None, rgb).unwrap();
-    assert_eq!(out, b"\x1b_Ga=d,d=i,i=1109,q=2\x1b\\");
+    assert_eq!(out, b"\x1b_Ga=d,d=i,i=11109,q=2\x1b\\");
     out.clear();
     // changement de thème : tout est supprimé puis retransmis
     k.draw(&mut out, Some(bar(1.0, 1.0, 1.0)), (9, 9, 9))

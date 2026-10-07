@@ -54,6 +54,8 @@ pub struct CaretTarget {
     pub x: f64,
     pub y: f64,
     pub width: f64,
+    /// Hauteur de la lettre en lignes (taille du texte, `fontSize`).
+    pub height: f64,
 }
 
 /// Ce qu'il faut dessiner à un instant donné.
@@ -63,6 +65,7 @@ pub struct CaretFrame {
     pub x: f64,
     pub y: f64,
     pub width: f64,
+    pub height: f64,
     pub opacity: f64,
     /// Encore en mouvement : l'image suivante sera différente.
     pub moving: bool,
@@ -73,6 +76,7 @@ pub struct Caret {
     x: Tween,
     y: Tween,
     width: Tween,
+    height: f64,
     /// Début du cycle de clignotement ; `None` : caret plein (on tape).
     blink_since: Option<f64>,
 }
@@ -83,6 +87,7 @@ impl Default for Caret {
             x: Tween::fixed(0.0),
             y: Tween::fixed(0.0),
             width: Tween::fixed(1.0),
+            height: 1.0,
             blink_since: Some(0.0),
         }
     }
@@ -94,6 +99,7 @@ impl Caret {
         self.x.jump(t.x);
         self.y.jump(t.y);
         self.width.jump(t.width);
+        self.height = t.height;
     }
 
     /// `goTo` : glisse vers la cible en `duration` ms (0 : saut), en repartant
@@ -102,6 +108,7 @@ impl Caret {
         self.x.retarget(t.x, now, duration, CARET_EASE);
         self.y.retarget(t.y, now, duration, CARET_EASE);
         self.width.retarget(t.width, now, duration, CARET_EASE);
+        self.height = t.height;
     }
 
     pub fn target(&self) -> CaretTarget {
@@ -109,6 +116,7 @@ impl Caret {
             x: self.x.to,
             y: self.y.to,
             width: self.width.to,
+            height: self.height,
         }
     }
 
@@ -159,6 +167,7 @@ impl Caret {
             x: self.x.value(now),
             y: self.y.value(now),
             width: self.width.value(now),
+            height: self.height,
             opacity: self.opacity(now, smooth_blink),
             moving: self.is_moving(now),
         }
@@ -166,9 +175,15 @@ impl Caret {
 }
 
 /// Part de la case (`col`, `row`) couverte par le rectangle du caret
-/// `[x, x + width) × [y, y + 1)` : sert à teinter le fond des lettres pendant
+/// `[x, x + width) × [y, y + height)` : sert à teinter le fond des lettres pendant
 /// le glissement du caret bloc (rendu demi-case et plus fin).
 pub fn coverage(f: &CaretFrame, col: u16, row: u16) -> f64 {
-    let overlap = |a0: f64, a1: f64, b0: f64| (a1.min(b0 + 1.0) - a0.max(b0)).max(0.0);
-    overlap(f.x, f.x + f.width, f64::from(col)) * overlap(f.y, f.y + 1.0, f64::from(row))
+    coverage_box(f, col, row, 1)
+}
+
+/// Part d'un bloc de `size × size` cases (une lettre agrandie) couverte par le caret.
+pub fn coverage_box(f: &CaretFrame, col: u16, row: u16, size: u16) -> f64 {
+    let s = f64::from(size.max(1));
+    let overlap = |a0: f64, a1: f64, b0: f64| (a1.min(b0 + s) - a0.max(b0)).max(0.0) / s;
+    overlap(f.x, f.x + f.width, f64::from(col)) * overlap(f.y, f.y + f.height, f64::from(row))
 }

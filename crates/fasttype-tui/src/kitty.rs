@@ -146,21 +146,24 @@ fn thin(cell_h: u32) -> u32 {
     (cell_h as f64 / 12.0).round().max(2.0) as u32
 }
 
-/// Image du caret : taille en pixels et pixels RGBA (alpha = `alpha`).
+/// Image du caret pour une lettre de `width_cells` × `height_cells` cases :
+/// taille en pixels et pixels RGBA (alpha = `alpha`).
 pub fn caret_image(
     style: CaretStyle,
     cell: CellPx,
     width_cells: u32,
+    height_cells: u32,
     rgb: Rgb,
     alpha: u8,
 ) -> (u32, u32, Vec<u8>) {
     let full = width_cells.max(1) * cell.w;
+    let tall = height_cells.max(1) * cell.h;
     let (w, h) = match style {
-        CaretStyle::Underline => (full, thin(cell.h)),
-        CaretStyle::Outline => (full, cell.h),
-        _ => (thin(cell.h), cell.h),
+        CaretStyle::Underline => (full, thin(tall)),
+        CaretStyle::Outline => (full, tall),
+        _ => (thin(tall), tall),
     };
-    let border = (cell.h as f64 / 24.0).round().max(1.0) as u32;
+    let border = (tall as f64 / 24.0).round().max(1.0) as u32;
     let mut px = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
@@ -178,12 +181,13 @@ pub fn caret_image(
 /// Coin haut-gauche de l'image en pixels de l'écran.
 pub fn caret_origin(f: &CaretFrame, cell: CellPx) -> (u32, u32) {
     let (cw, ch) = (f64::from(cell.w), f64::from(cell.h));
+    let tall = (f64::from(cell.h) * f.height.max(1.0)).round() as u32;
     let mut x = f.x * cw;
     let mut y = f.y * ch;
     match f.style {
         // barre centrée sur le bord gauche de la lettre
-        CaretStyle::Bar => x -= f64::from(thin(cell.h)) / 2.0,
-        CaretStyle::Underline => y += ch - f64::from(thin(cell.h)),
+        CaretStyle::Bar => x -= f64::from(thin(tall)) / 2.0,
+        CaretStyle::Underline => y += f64::from(tall) - f64::from(thin(tall)),
         _ => {}
     }
     (x.round().max(0.0) as u32, y.round().max(0.0) as u32)
@@ -219,13 +223,13 @@ impl KittyCaret {
         self.last = None;
     }
 
-    fn image_id(style: CaretStyle, width_cells: u32, level: u32) -> u32 {
+    fn image_id(style: CaretStyle, width_cells: u32, height_cells: u32, level: u32) -> u32 {
         let s = match style {
             CaretStyle::Underline => 2,
             CaretStyle::Outline => 3,
             _ => 1,
         };
-        s * 1000 + width_cells.min(9) * 100 + level + 1
+        height_cells.min(9) * 10_000 + s * 1000 + width_cells.min(9) * 100 + level + 1
     }
 
     /// Écrit ce qu'il faut pour montrer `frame` (ou rien si `None`).
@@ -258,10 +262,11 @@ impl KittyCaret {
         let level = (f.opacity * f64::from(LEVELS))
             .round()
             .clamp(1.0, f64::from(LEVELS)) as u32;
-        let id = Self::image_id(f.style, width_cells, level);
+        let height_cells = f.height.round().max(1.0) as u32;
+        let id = Self::image_id(f.style, width_cells, height_cells, level);
         if self.sent.insert(id) {
             let alpha = (f64::from(level) / f64::from(LEVELS) * 255.0).round() as u8;
-            let (w, h, px) = caret_image(f.style, self.cell, width_cells, rgb, alpha);
+            let (w, h, px) = caret_image(f.style, self.cell, width_cells, height_cells, rgb, alpha);
             out.write_all(&transmit(id, w, h, &px))?;
         }
         if let Some(old) = self.placed

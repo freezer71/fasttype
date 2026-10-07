@@ -914,6 +914,7 @@ impl App {
             x: f64::from(words.left + col),
             y: f64::from(words.top) + line as f64,
             width: f64::from(width),
+            height: 1.0,
         };
         if self.caret_reset {
             self.caret.jump(target);
