@@ -1,6 +1,7 @@
 use fasttype_tui::caret::{CaretFrame, CaretStyle};
 use fasttype_tui::kitty::{
-    CaretRenderer, CellPx, KittyCaret, base64, caret_image, caret_origin, place, transmit,
+    CaretRenderer, CellPx, KittyCaret, base64, caret_image, caret_origin, place, probe_answer,
+    transmit,
 };
 
 const CELL: CellPx = CellPx { w: 10, h: 24 };
@@ -46,39 +47,58 @@ fn cell_size_from_window() {
 #[test]
 fn renderer_detection() {
     let cell = Some(CELL);
+    let none = env(&[]);
     assert_eq!(
-        CaretRenderer::detect(env(&[("TERM", "xterm-kitty")]), cell),
-        CaretRenderer::Kitty(CELL)
+        CaretRenderer::detect(&none, cell, true),
+        CaretRenderer::Kitty(CELL),
+        "le terminal a répondu OK à la sonde graphique"
     );
     assert_eq!(
-        CaretRenderer::detect(env(&[("TERM_PROGRAM", "ghostty")]), cell),
-        CaretRenderer::Kitty(CELL)
-    );
-    assert_eq!(
-        CaretRenderer::detect(env(&[("TERM", "xterm-kitty"), ("TMUX", "/tmp/x")]), cell),
+        CaretRenderer::detect(env(&[("TERM", "xterm-kitty")]), cell, false),
         CaretRenderer::Cell,
-        "tmux ne relaie pas les images"
+        "pas de réponse (Zellij, tmux, terminal imbriqué) : pas d'image"
     );
     assert_eq!(
-        CaretRenderer::detect(env(&[("TERM", "xterm-kitty")]), None),
+        CaretRenderer::detect(&none, None, true),
         CaretRenderer::Cell,
         "taille des cases inconnue"
     );
     assert_eq!(
-        CaretRenderer::detect(env(&[("TERM_PROGRAM", "Apple_Terminal")]), cell),
-        CaretRenderer::Cell
-    );
-    assert_eq!(
-        CaretRenderer::detect(env(&[("FASTTYPE_CARET", "kitty")]), cell),
+        CaretRenderer::detect(env(&[("FASTTYPE_CARET", "kitty")]), cell, false),
         CaretRenderer::Kitty(CELL)
     );
     assert_eq!(
-        CaretRenderer::detect(
-            env(&[("TERM", "xterm-kitty"), ("FASTTYPE_CARET", "cell")]),
-            cell
-        ),
+        CaretRenderer::detect(env(&[("FASTTYPE_CARET", "cell")]), cell, true),
         CaretRenderer::Cell
     );
+}
+
+#[test]
+fn graphics_probe_answers() {
+    assert_eq!(probe_answer(b""), None, "réponse pas encore arrivée");
+    assert_eq!(probe_answer(b"\x1b_Gi=31;OK\x1b\\"), None, "attend DA1");
+    assert_eq!(probe_answer(b"\x1b_Gi=31;OK\x1b\\\x1b[?62;22c"), Some(true));
+    assert_eq!(probe_answer(b"\x1b[?62c"), Some(false));
+    assert_eq!(
+        probe_answer(b"\x1b_Gi=31;EINVAL:bad\x1b\\\x1b[?1;2c"),
+        Some(false)
+    );
+}
+
+#[test]
+fn unchanged_caret_is_not_sent_again() {
+    let mut k = KittyCaret::new(CELL);
+    let mut out = Vec::new();
+    k.draw(&mut out, Some(bar(3.5, 2.0, 1.0)), (1, 2, 3))
+        .unwrap();
+    out.clear();
+    k.draw(&mut out, Some(bar(3.5, 2.0, 1.0)), (1, 2, 3))
+        .unwrap();
+    assert!(out.is_empty(), "même image au même endroit : rien à écrire");
+    k.invalidate();
+    k.draw(&mut out, Some(bar(3.5, 2.0, 1.0)), (1, 2, 3))
+        .unwrap();
+    assert!(!out.is_empty(), "après un effacement d'écran, on replace");
 }
 
 #[test]

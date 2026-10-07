@@ -8,7 +8,9 @@ use crate::input::spawn_signal_watcher;
 use crate::input::{Input, spawn_reader};
 use crate::kitty::{CaretRenderer, CellPx, DELETE_ALL, KittyCaret};
 use crate::perf::Perf;
-use crate::terminal::{FrameWriter, TerminalGuard, mark_kitty_images, queue_caret_look};
+use crate::terminal::{
+    FrameWriter, TerminalGuard, graphics_supported, mark_kitty_images, queue_caret_look,
+};
 use crate::theme::ColorMode;
 use crossterm::queue;
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
@@ -85,11 +87,15 @@ impl Output {
         if size != self.size {
             self.size = size;
             // la taille des cases a pu changer (zoom) : images à refaire
-            if let Some(k) = &mut self.kitty
-                && let Some(cell) = cell_px()
-            {
-                self.term.backend_mut().write_all(DELETE_ALL)?;
-                *k = KittyCaret::new(cell);
+            if let Some(k) = &mut self.kitty {
+                match cell_px() {
+                    Some(cell) => {
+                        self.term.backend_mut().write_all(DELETE_ALL)?;
+                        *k = KittyCaret::new(cell);
+                    }
+                    // l'écran va être effacé : replacer l'image au prochain dessin
+                    None => k.invalidate(),
+                }
             }
         }
         queue!(self.term.backend_mut(), BeginSynchronizedUpdate)?;
@@ -136,7 +142,8 @@ pub fn run(opts: Options) -> io::Result<Perf> {
     let clock = Arc::new(SystemClock::new());
     let color_mode = ColorMode::detect(|k| std::env::var(k).ok());
     let _guard = TerminalGuard::enter()?;
-    let renderer = CaretRenderer::detect(|k| std::env::var(k).ok(), cell_px());
+    let renderer =
+        CaretRenderer::detect(|k| std::env::var(k).ok(), cell_px(), graphics_supported());
     let (tx, rx) = mpsc::sync_channel::<Input>(4096);
     #[cfg(unix)]
     spawn_signal_watcher(tx.clone())?;

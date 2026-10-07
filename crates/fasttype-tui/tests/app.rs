@@ -295,12 +295,29 @@ fn restart_fades_out_then_in_and_ignores_keys_meanwhile() {
         })
     );
     assert_ne!(a.session().words(), first.as_slice());
-    // le nouveau test accepte la frappe pendant qu'il apparaît
+    // comme sur le site, les touches restent ignorées pendant que le test apparaît
     let c = a.session().word(0).chars().next().unwrap();
     a.handle(press(Key::Char(c), 340.0));
-    assert_eq!(a.session().state(), SessionState::Running);
-    a.tick(200.0 + 2.0 * FADE_MS);
+    assert_eq!(a.session().state(), SessionState::Ready);
+    // dès la fin du fondu, une touche compte, même avant le prochain tick
+    a.handle(press(Key::Char(c), 200.0 + 2.0 * FADE_MS + 1.0));
     assert_eq!(a.transition(), None);
+    assert_eq!(a.session().state(), SessionState::Running);
+}
+
+#[test]
+fn a_key_right_after_the_fade_out_is_not_lost() {
+    use fasttype_tui::app::FADE_MS;
+    let mut a = app("fade-edge", "quick_restart = \"tab\"\n");
+    a.handle(press(Key::Tab, 100.0));
+    a.tick(100.0);
+    // aucun tick entre la fin des fondus et la touche
+    let c = {
+        a.tick(100.0 + FADE_MS);
+        a.session().word(0).chars().next().unwrap()
+    };
+    a.handle(press(Key::Char(c), 100.0 + 2.0 * FADE_MS + 3.0));
+    assert_eq!(a.session().state(), SessionState::Running);
 }
 
 #[test]

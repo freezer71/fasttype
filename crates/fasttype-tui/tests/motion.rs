@@ -17,26 +17,48 @@ fn next_char(a: &fasttype_tui::app::App) -> char {
 }
 
 #[test]
-fn cell_caret_glides_letter_by_letter() {
-    // smoothCaret slow : 150 ms
+fn cell_caret_moves_on_the_keypress_frame() {
+    // le curseur du terminal ne peut pas montrer de position intermédiaire :
+    // un glissement n'y ajouterait que du retard (smoothCaret slow : 75 ms)
     let mut a = app("m-glide", "smooth_caret = \"slow\"\n");
     let (_, start) = render(&mut a, 80, 24);
     let (x0, y0) = start.unwrap();
     let c = next_char(&a);
     a.handle(press(Key::Char(c), 1000.0));
-    let (_, mid) = render(&mut a, 80, 24);
-    assert_eq!(
-        mid,
-        Some((x0, y0)),
-        "le glissement part de l'ancienne position"
-    );
-    assert!(
-        a.next_deadline().is_some_and(|d| d < 1020.0),
-        "images d'animation"
-    );
+    a.tick(1000.0);
+    let (_, now) = render(&mut a, 80, 24);
+    assert_eq!(now, Some((x0 + 1, y0)), "dès l'image de la frappe");
+}
+
+#[test]
+fn kitty_caret_glides_with_smooth_caret() {
+    let mut a = app("m-glide-kitty", "smooth_caret = \"slow\"\n");
+    a.set_caret_renderer(CaretRenderer::Kitty(CellPx { w: 10, h: 20 }));
+    render(&mut a, 80, 24);
+    let x0 = a.caret_frame().unwrap().x;
+    let c = next_char(&a);
+    a.handle(press(Key::Char(c), 1000.0));
+    a.tick(1075.0);
+    render(&mut a, 80, 24);
+    let mid = a.caret_frame().unwrap();
+    assert!(mid.x > x0 && mid.x < x0 + 1.0, "à mi-chemin : {}", mid.x);
     a.tick(1150.0);
-    let (_, end) = render(&mut a, 80, 24);
-    assert_eq!(end, Some((x0 + 1, y0)));
+    render(&mut a, 80, 24);
+    assert_eq!(a.caret_frame().unwrap().x, x0 + 1.0);
+}
+
+#[test]
+fn idle_blink_wakes_only_when_the_blink_level_changes() {
+    let mut a = app("m-blink-idle", "");
+    a.set_caret_renderer(CaretRenderer::Kitty(CellPx { w: 10, h: 20 }));
+    a.tick(5000.0);
+    render(&mut a, 80, 24);
+    let d = a.next_deadline().expect("le caret clignote");
+    assert!(
+        d - 5000.0 > 30.0,
+        "≈ 32 réveils/s au plus, pas 60 : {}",
+        d - 5000.0
+    );
 }
 
 #[test]

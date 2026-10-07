@@ -93,6 +93,8 @@ pub struct App {
     pub quit: bool,
     /// Instant du dernier `tick` ou de la dernière touche.
     now: f64,
+    /// Instant de la dernière touche prise en compte : le caret glisse depuis là.
+    input_at: f64,
     frames: FrameClock,
     renderer: CaretRenderer,
     caret: Caret,
@@ -228,6 +230,7 @@ impl App {
             seed,
             quit: false,
             now,
+            input_at: now,
             frames: FrameClock::new(60, now),
             renderer: CaretRenderer::Cell,
             caret: Caret::default(),
@@ -402,10 +405,15 @@ impl App {
             self.quit = true;
             return;
         }
-        // l'écran disparaît avant un restart : les touches sont ignorées
-        if matches!(self.transition, Some(Transition::Restart { .. })) {
+        // le restart dure ses deux fondus (`isTestRestarting`) : les touches sont ignorées
+        self.advance_transitions(at);
+        if matches!(
+            self.transition,
+            Some(Transition::Restart { .. } | Transition::FadeIn { .. })
+        ) {
             return;
         }
+        self.input_at = at;
         // En zen, Entrée insère un saut de ligne et Shift+Entrée termine le test :
         // ni l'une ni l'autre ne relance.
         let zen = self.session.spec().mode == Mode::Zen && matches!(self.screen, Screen::Test);
@@ -474,11 +482,15 @@ impl App {
         self.update_motion(at);
     }
 
-    pub fn tick(&mut self, now: f64) {
-        self.now = self.now.max(now);
-        let now = self.now;
+    /// Fait avancer les fondus jusqu'à `now` : le restart a lieu à la fin du
+    /// fondu de sortie, même si aucun tick n'est tombé pile à ce moment.
+    fn advance_transitions(&mut self, now: f64) {
+        if let Some(Transition::Restart { start }) = self.transition
+            && now >= start + FADE_MS
+        {
+            self.restart(start + FADE_MS);
+        }
         match self.transition {
-            Some(Transition::Restart { start }) if now >= start + FADE_MS => self.restart(now),
             Some(Transition::ToResult { start }) if now >= start + 2.0 * FADE_MS => {
                 self.transition = None;
             }
@@ -487,6 +499,12 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    pub fn tick(&mut self, now: f64) {
+        self.now = self.now.max(now);
+        let now = self.now;
+        self.advance_transitions(now);
         if matches!(self.screen, Screen::Test) {
             if self.session.tick(now) {
                 let s = self.session.live_stats();
@@ -562,15 +580,23 @@ impl App {
         }
     }
 
-    /// Une image change-t-elle sans frappe ?
-    fn animating(&self, now: f64) -> bool {
-        let blink_frames = self.caret.is_blinking()
-            && matches!(self.screen, Screen::Test)
+    /// Prochain palier d'opacité du clignotement, s'il se dessine dans
+    /// l'image (caret Kitty ou bloc) : 16 paliers par demi-période, soit 32
+    /// réveils par seconde au plus au lieu d'une image à chaque 1/60 s.
+    fn next_blink_step(&self, now: f64) -> Option<f64> {
+        let drawn = matches!(self.screen, Screen::Test)
+            && self.transition.is_none()
             && (matches!(self.renderer, CaretRenderer::Kitty(_))
                 || self.caret_style() == CaretStyle::Block);
+        let since = self.caret.blink_since().filter(|_| drawn)?;
+        let step = 1000.0 / f64::from(2 * crate::kitty::LEVELS);
+        Some(since + ((now - since) / step).floor() * step + step)
+    }
+
+    /// Une image change-t-elle sans frappe (hors clignotement) ?
+    fn animating(&self, now: f64) -> bool {
         self.transition.is_some()
             || self.caret.is_moving(now)
-            || blink_frames
             || self.line_fade.is_some()
             || self.chrome.is_running(now)
             || self.logo.is_running(now)
@@ -588,7 +614,8 @@ impl App {
         let frame = self
             .animating(self.now)
             .then(|| self.frames.next_after(self.now));
-        [tick, self.notifications.next_expiry(), frame]
+        let blink = self.next_blink_step(self.now);
+        [tick, self.notifications.next_expiry(), frame, blink]
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)
@@ -892,8 +919,14 @@ impl App {
             self.caret.jump(target);
             self.caret_reset = false;
         } else if target != self.caret.target() {
-            let ms = smooth_caret_ms(self.store.config.str("smoothCaret"));
-            self.caret.go_to(target, now, ms);
+            // le curseur du terminal ne montre pas de position intermédiaire :
+            // un glissement n'y ajouterait que du retard
+            let ms = if self.renderer == CaretRenderer::Cell && style != CaretStyle::Block {
+                0.0
+            } else {
+                smooth_caret_ms(self.store.config.str("smoothCaret"))
+            };
+            self.caret.go_to(target, self.input_at.min(now), ms);
         }
         let smooth_blink = self.store.config.str("smoothCaret") != "off";
         let mut f = self.caret.frame(style, now, smooth_blink);

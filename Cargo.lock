@@ -603,6 +603,7 @@ dependencies = [
  "fasttype-core",
  "fasttype-data",
  "fasttype-store",
+ "libc",
  "ratatui",
  "signal-hook",
  "unicode-width",

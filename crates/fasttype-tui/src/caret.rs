@@ -123,6 +123,11 @@ impl Caret {
         self.blink_since = None;
     }
 
+    /// Début du cycle de clignotement en cours.
+    pub fn blink_since(&self) -> Option<f64> {
+        self.blink_since
+    }
+
     pub fn is_blinking(&self) -> bool {
         self.blink_since.is_some()
     }

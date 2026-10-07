@@ -1,6 +1,6 @@
 """Lance fasttype dans un pseudo-terminal, tape un test custom complet, quitte.
 Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sigterm]
-  --kitty    caret en image Kitty (cases de 10 × 20 pixels annoncées)
+  --kitty    le terminal répond OK à la sonde graphique Kitty (cases de 10 × 20 pixels)
   --sigterm  quitte par SIGTERM au lieu de Ctrl+C"""
 import fcntl, os, pty, re, select, signal, struct, sys, termios, time
 
@@ -14,7 +14,7 @@ with open(f"{home}/.config/fasttype/config.toml", "w") as f:
 pid, fd = pty.fork()
 if pid == 0:
     os.environ.update({"HOME": home, "TERM": "xterm-256color", "COLORTERM": "truecolor"})
-    os.environ.update({"FASTTYPE_CARET": "kitty" if kitty else "cell"})
+    os.environ.pop("FASTTYPE_CARET", None)
     os.environ.pop("XDG_CONFIG_HOME", None)
     os.environ.pop("XDG_DATA_HOME", None)
     os.execv(binary, [binary] + (["--perf"] if perf else []))
@@ -36,6 +36,9 @@ def pump(seconds):
         if not data:
             return
         out.extend(data)
+        # sonde graphique : OK seulement si l'on joue un terminal Kitty
+        if kitty and b"a=q" in data:
+            os.write(fd, b"\x1b_Gi=31;OK\x1b\\")
         # réponses d'un terminal sans protocole clavier Kitty
         if b"\x1b[6n" in data:
             os.write(fd, b"\x1b[1;1R")

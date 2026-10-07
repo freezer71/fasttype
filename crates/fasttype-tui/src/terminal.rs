@@ -20,6 +20,53 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static KEYBOARD_PUSHED: AtomicBool = AtomicBool::new(false);
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static KITTY_IMAGES: AtomicBool = AtomicBool::new(false);
+static GRAPHICS: AtomicBool = AtomicBool::new(false);
+
+/// Le terminal a répondu OK à la sonde graphique Kitty au démarrage.
+pub fn graphics_supported() -> bool {
+    GRAPHICS.load(Ordering::SeqCst)
+}
+
+/// Envoie `kitty::PROBE` et lit la réponse directement sur l'entrée, avant
+/// que le thread clavier ne la lise : 300 ms au plus (DA1 arrive bien avant).
+#[cfg(unix)]
+fn probe_graphics(out: &mut impl Write) -> io::Result<bool> {
+    use std::time::{Duration, Instant};
+    out.write_all(crate::kitty::PROBE)?;
+    out.flush()?;
+    let deadline = Instant::now() + Duration::from_millis(300);
+    let mut got = Vec::new();
+    loop {
+        if let Some(ok) = crate::kitty::probe_answer(&got) {
+            return Ok(ok);
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Ok(false);
+        }
+        let mut fds = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY : un seul descripteur valide, tampon local de taille connue.
+        let ready = unsafe { libc::poll(&mut fds, 1, left.as_millis() as libc::c_int) };
+        if ready <= 0 {
+            return Ok(false);
+        }
+        let mut buf = [0u8; 256];
+        let n = unsafe { libc::read(libc::STDIN_FILENO, buf.as_mut_ptr().cast(), buf.len()) };
+        if n <= 0 {
+            return Ok(false);
+        }
+        got.extend_from_slice(&buf[..n as usize]);
+    }
+}
+
+#[cfg(not(unix))]
+fn probe_graphics(_out: &mut impl Write) -> io::Result<bool> {
+    Ok(false)
+}
 
 /// Des images Kitty (caret) seront affichées : `restore` les supprimera.
 pub fn mark_kitty_images() {
@@ -132,6 +179,8 @@ impl TerminalGuard {
         let guard = TerminalGuard;
         let mut out = io::stdout();
         execute!(out, EnterAlternateScreen)?;
+        // avant toute autre lecture de l'entrée (protocole clavier, thread clavier)
+        GRAPHICS.store(probe_graphics(&mut out)?, Ordering::SeqCst);
         if matches!(supports_keyboard_enhancement(), Ok(true)) {
             execute!(
                 out,

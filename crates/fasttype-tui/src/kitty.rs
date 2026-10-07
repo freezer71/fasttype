@@ -40,28 +40,39 @@ pub enum CaretRenderer {
 }
 
 impl CaretRenderer {
-    /// `FASTTYPE_CARET=cell|kitty` force le choix ; sinon Kitty et Ghostty
-    /// (hors tmux et screen, qui ne relaient pas les images) ont le rendu Kitty.
-    pub fn detect(get: impl Fn(&str) -> Option<String>, cell: Option<CellPx>) -> Self {
+    /// `FASTTYPE_CARET=cell|kitty` force le choix. Sinon, l'image n'est
+    /// utilisée que si le terminal a répondu OK à la sonde graphique
+    /// (`graphics`) : un terminal imbriqué ou un multiplexeur (tmux, Zellij)
+    /// qui hérite des variables de Kitty mais n'affiche pas les images n'a
+    /// jamais de caret invisible.
+    pub fn detect(
+        get: impl Fn(&str) -> Option<String>,
+        cell: Option<CellPx>,
+        graphics: bool,
+    ) -> Self {
         let kitty = match get("FASTTYPE_CARET").as_deref() {
             Some("cell") => false,
             Some("kitty") => true,
-            _ => {
-                let term = get("TERM").unwrap_or_default();
-                let program = get("TERM_PROGRAM").unwrap_or_default();
-                let multiplexed = get("TMUX").is_some() || get("STY").is_some();
-                !multiplexed
-                    && (term == "xterm-kitty"
-                        || term == "xterm-ghostty"
-                        || program == "ghostty"
-                        || get("KITTY_WINDOW_ID").is_some())
-            }
+            _ => graphics,
         };
         match cell {
             Some(c) if kitty => CaretRenderer::Kitty(c),
             _ => CaretRenderer::Cell,
         }
     }
+}
+
+/// Sonde graphique : une image 1 × 1 en requête (`a=q`), suivie d'une
+/// demande d'attributs (DA1) à laquelle tous les terminaux répondent.
+pub const PROBE: &[u8] = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c";
+
+/// Lit la réponse à `PROBE` : `None` tant que la réponse DA1 n'est pas
+/// arrivée, puis `Some(true)` si le terminal a répondu OK à la requête graphique.
+pub fn probe_answer(bytes: &[u8]) -> Option<bool> {
+    let text = String::from_utf8_lossy(bytes);
+    let da1 = text.find("\x1b[?")?;
+    text[da1..].find('c')?;
+    Some(text[..da1].contains("\x1b_Gi=31;OK"))
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -188,6 +199,8 @@ pub struct KittyCaret {
     rgb: Option<Rgb>,
     sent: HashSet<u32>,
     placed: Option<u32>,
+    /// Dernier placement écrit (image, case, décalage) : rien à renvoyer s'il ne change pas.
+    last: Option<(u32, u32, u32, u32, u32)>,
 }
 
 impl KittyCaret {
@@ -197,7 +210,13 @@ impl KittyCaret {
             rgb: None,
             sent: HashSet::new(),
             placed: None,
+            last: None,
         }
+    }
+
+    /// L'écran a été effacé : le prochain dessin replace l'image.
+    pub fn invalidate(&mut self) {
+        self.last = None;
     }
 
     fn image_id(style: CaretStyle, width_cells: u32, level: u32) -> u32 {
@@ -224,6 +243,7 @@ impl KittyCaret {
             self.rgb = Some(rgb);
             self.sent.clear();
             self.placed = None;
+            self.last = None;
         }
         let shown = frame
             .filter(|f| !matches!(f.style, CaretStyle::Off | CaretStyle::Block) && f.opacity > 0.0);
@@ -231,6 +251,7 @@ impl KittyCaret {
             if let Some(id) = self.placed.take() {
                 hide(out, id)?;
             }
+            self.last = None;
             return Ok(());
         };
         let width_cells = f.width.round().max(1.0) as u32;
@@ -250,8 +271,13 @@ impl KittyCaret {
         }
         let (px, py) = caret_origin(&f, self.cell);
         let (col, row) = (px / self.cell.w, py / self.cell.h);
-        place(out, id, col, row, px % self.cell.w, py % self.cell.h)?;
+        let spot = (id, col, row, px % self.cell.w, py % self.cell.h);
+        if self.last == Some(spot) {
+            return Ok(());
+        }
+        place(out, id, col, row, spot.3, spot.4)?;
         self.placed = Some(id);
+        self.last = Some(spot);
         Ok(())
     }
 }
