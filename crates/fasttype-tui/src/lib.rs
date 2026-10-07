@@ -1,5 +1,6 @@
 //! Interface terminal de fasttype : écrans, entrées, boucle de rendu.
 
+pub mod anim;
 pub mod app;
 pub mod input;
 pub mod layout;
