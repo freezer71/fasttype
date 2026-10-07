@@ -3,6 +3,7 @@
 //! Chaque action est horodatée par l'appelant (`now`, en ms d'une horloge monotone).
 
 use crate::chars::count_words;
+use crate::chars::normalize_typed;
 use crate::event::{EventContext, EventKind, EventLog};
 use crate::generator::WordGenerator;
 use crate::numbers::{calculate_wpm, js_round};
@@ -195,12 +196,18 @@ impl TestSession {
             return InputOutcome::Ignored;
         }
         let zen = self.is_zen();
+        let a = self.active;
+        let input_len = self.inputs[a].chars().count();
+        let target = if zen {
+            None
+        } else {
+            self.words[a].chars().nth(input_len)
+        };
+        let ch = normalize_typed(ch, target, &self.spec.language);
         let commit = ch == ' ' || ch == '\n';
         if ch == '\n' && !zen && !self.has_newlines {
             return InputOutcome::Ignored;
         }
-        let a = self.active;
-        let input_len = self.inputs[a].chars().count();
         if commit && input_len == 0 {
             return InputOutcome::Ignored;
         }
@@ -218,13 +225,18 @@ impl TestSession {
             self.start(now);
         }
         let ms = self.ms(now);
-        let correct = zen || self.words[a].chars().nth(input_len) == Some(ch);
+        let correct = zen || target == Some(ch);
         if correct {
             self.correct_inputs += 1;
         } else {
             self.incorrect_inputs += 1;
         }
-        self.inputs[a].push(ch);
+        // espace qui valide le dernier mot généré alors qu'il est faux : compté
+        // pour la précision mais pas ajouté à la saisie (helpers.ts)
+        let dropped = ch == ' ' && !correct && a + 1 == self.words.len();
+        if !dropped {
+            self.inputs[a].push(ch);
+        }
         self.log.push(
             ms,
             EventKind::Insert {
@@ -232,13 +244,14 @@ impl TestSession {
                 char_index: input_len as u32,
                 ch,
                 correct,
+                dropped,
             },
         );
         if input_len == 0 && self.first_insert[a].is_none() {
             self.first_insert[a] = Some(ms);
         }
         if commit {
-            return self.commit(ms);
+            return self.commit(ms, input_len + 1);
         }
         if self.is_last_word() && self.inputs[a] == self.words[a] {
             self.finish_at(ms, EndReason::Completed);
@@ -248,12 +261,12 @@ impl TestSession {
     }
 
     /// Validation du mot actif (le séparateur vient d'être inséré).
-    fn commit(&mut self, ms: f64) -> InputOutcome {
+    fn commit(&mut self, ms: f64, typed_len: usize) -> InputOutcome {
         let a = self.active;
         let zen = self.is_zen();
         let correct = zen || self.inputs[a] == self.words[a];
-        // `computeBurst` : longueur saisie (séparateur compris) depuis la 1re lettre
-        let len = self.inputs[a].chars().count() as f64;
+        // `computeBurst` : longueur saisie, séparateur compris, depuis la 1re lettre
+        let len = typed_len as f64;
         let burst = match self.first_insert[a] {
             Some(start) if ms > start => js_round(calculate_wpm(len, (ms - start) / 1000.0)),
             Some(_) => f64::INFINITY,
@@ -266,7 +279,10 @@ impl TestSession {
         }
         self.active += 1;
         if zen {
-            self.push_word(String::new());
+            // après un retour arrière, le mot suivant existe déjà
+            if self.active >= self.words.len() {
+                self.push_word(String::new());
+            }
         } else {
             self.add_word();
         }
@@ -278,8 +294,9 @@ impl TestSession {
     }
 
     /// Mot précédent rouvrable : seulement s'il est faux (pas de freedom mode en v1).
+    /// En zen, la cible est vide : le mot précédent n'est jamais « juste ».
     fn previous_editable_word(&self) -> Option<usize> {
-        if self.active == 0 || self.is_zen() {
+        if self.active == 0 {
             return None;
         }
         let prev = self.active - 1;

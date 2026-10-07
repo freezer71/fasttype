@@ -18,6 +18,7 @@ fn log() -> EventLog {
                 char_index: i as u32,
                 ch,
                 correct: true,
+                dropped: false,
             },
         );
     }
@@ -28,6 +29,7 @@ fn log() -> EventLog {
             char_index: 0,
             ch: 'x',
             correct: false,
+            dropped: false,
         },
     );
     log.push(400.0, EventKind::DeleteChar { word_index: 1 });
@@ -38,6 +40,7 @@ fn log() -> EventLog {
             char_index: 0,
             ch: 'c',
             correct: true,
+            dropped: false,
         },
     );
     log
@@ -87,6 +90,7 @@ fn event_serializes_with_type_tag() {
             char_index: 1,
             ch: 'é',
             correct: true,
+            dropped: false,
         },
     };
     let json = serde_json::to_string(&e).unwrap();

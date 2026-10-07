@@ -123,7 +123,8 @@ consistency = round2(kogasa(stddev_pop(burst_per_second) / mean(burst_per_second
 
 ### 4.6 Restart et repeat
 - **Restart** : nouveau jeu de mots. Il est refusé par le raccourci rapide pour les tests longs (words ≥ 1000 ou 0, time ≥ 900 ou 0) ; dans ce cas il faut ajouter `shift`.
-- **Repeat** : les mêmes mots. Le test est marqué « repeated » et n'est pas enregistré. Indisponible en zen.
+- **Repeat** : les mêmes mots. Le test est marqué « repeated » et n'est pas enregistré, sauf en quote : une citation répétée reste enregistrée (sans compter pour les PB), comme sur Monkeytype. Indisponible en zen.
+- **Équivalences** : comme Monkeytype (`normalizeData`), une frappe typographiquement équivalente au caractère attendu est acceptée (`'` pour `’`, `"` pour `“`, `-` pour `—`, `е` pour `ё` en russe) et toute espace Unicode vaut une espace.
 
 ## 5. `fasttype-tui` : interface et animations
 

@@ -20,11 +20,15 @@ pub enum EventKind {
         code: u32,
     },
     /// Insertion d'un caractère (y compris le séparateur qui valide le mot).
+    /// `dropped` : espace qui valide un dernier mot faux ; compté pour la
+    /// précision mais pas ajouté à la saisie (`applyInputEvent`, helpers.ts).
     Insert {
         word_index: u32,
         char_index: u32,
         ch: char,
         correct: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        dropped: bool,
     },
     DeleteChar {
         word_index: u32,
@@ -105,8 +109,16 @@ impl EventLog {
 /// Applique un événement de saisie à l'état des mots.
 pub fn apply_event(inputs: &mut BTreeMap<u32, String>, kind: &EventKind) {
     match kind {
-        EventKind::Insert { word_index, ch, .. } => {
-            inputs.entry(*word_index).or_default().push(*ch)
+        EventKind::Insert {
+            word_index,
+            ch,
+            dropped,
+            ..
+        } => {
+            let input = inputs.entry(*word_index).or_default();
+            if !dropped {
+                input.push(*ch);
+            }
         }
         EventKind::DeleteChar { word_index } => {
             inputs.entry(*word_index).or_default().pop();

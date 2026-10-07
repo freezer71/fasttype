@@ -72,3 +72,56 @@ where
     }
     total
 }
+
+/// Espaces Unicode tapables (`SPACE_CODE_POINTS`, utils/strings.ts).
+const SPACE_CODE_POINTS: &[char] = &[
+    '\u{0020}', '\u{2002}', '\u{2003}', '\u{2009}', '\u{3000}', '\u{00A0}', '\u{1680}', '\u{202F}',
+    '\u{FEFF}', '\u{2007}', '\u{2008}', '\u{2004}', '\u{200A}', '\u{200B}',
+];
+
+/// Caractères typographiquement équivalents (`CHAR_EQUIVALENCE_SETS`).
+const CHAR_EQUIVALENCE_SETS: &[&[char]] = &[
+    &['’', '‘', '\'', 'ʼ', '׳', 'ʻ', '᾽'],
+    &['"', '”', '“', '„'],
+    &['–', '—', '-', '‐', '‑'],
+    &[',', '‚'],
+];
+
+/// Équivalences propres à une langue (`LANGUAGE_EQUIVALENCE_SETS`).
+const LANGUAGE_EQUIVALENCE_SETS: &[(&str, &[char])] = &[("russian", &['ё', 'е', 'e'])];
+
+/// `isSpace` : espace Unicode tapable.
+pub fn is_space(c: char) -> bool {
+    SPACE_CODE_POINTS.contains(&c)
+}
+
+/// `areCharactersVisuallyEqual`.
+pub fn visually_equal(a: char, b: char, language: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    if (a == ' ' || b == ' ') && is_space(a) && is_space(b) {
+        return true;
+    }
+    if CHAR_EQUIVALENCE_SETS
+        .iter()
+        .any(|set| set.contains(&a) && set.contains(&b))
+    {
+        return true;
+    }
+    let base = crate::result::remove_language_size(language);
+    LANGUAGE_EQUIVALENCE_SETS
+        .iter()
+        .any(|(lang, set)| *lang == base && set.contains(&a) && set.contains(&b))
+}
+
+/// `normalizeData` : la frappe prend la forme du caractère attendu quand ils
+/// sont équivalents ; toute espace Unicode devient U+0020.
+pub fn normalize_typed(typed: char, target: Option<char>, language: &str) -> char {
+    if let Some(t) = target
+        && visually_equal(typed, t, language)
+    {
+        return t;
+    }
+    if is_space(typed) { ' ' } else { typed }
+}

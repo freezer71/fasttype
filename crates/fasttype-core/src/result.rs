@@ -152,7 +152,8 @@ pub fn build_result(log: &EventLog, spec: &TestSpec, repeated: bool, timestamp: 
 /// Ordre des contrôles de `finish`. Les bizarreries de Monkeytype sont
 /// reproduites telles quelles :
 /// - une limite custom en mots/sections < 10 (y compris 0 = infini) ou en temps < 15 rend le test « trop court » ;
-/// - la limite wpm de 350 ne s'applique pas au mode words (seul words 10 a la sienne : 420).
+/// - la limite wpm de 350 ne s'applique pas au mode words (seul words 10 a la sienne : 420) ;
+/// - une citation répétée reste valide (`setIsRepeated(false)` en quote).
 fn invalid_reason(r: &TestResult, spec: &TestSpec, repeated: bool) -> Option<Invalid> {
     let mode2: Option<i64> = r.mode2.parse().ok();
     let d = r.test_duration;
@@ -174,7 +175,7 @@ fn invalid_reason(r: &TestResult, spec: &TestSpec, repeated: bool) -> Option<Inv
         Some(Invalid::TooShort)
     } else if r.afk_detected {
         Some(Invalid::Afk)
-    } else if repeated {
+    } else if repeated && r.mode != Mode::Quote {
         Some(Invalid::Repeated)
     } else if speed_invalid(r.wpm) {
         Some(Invalid::Wpm)

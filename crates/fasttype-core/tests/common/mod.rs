@@ -60,6 +60,7 @@ impl LogBuilder {
                     char_index,
                     ch,
                     correct,
+                    dropped: false,
                 },
             );
             self.t += self.step;
