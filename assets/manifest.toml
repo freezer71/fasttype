@@ -1,0 +1,21 @@
+source = "https://github.com/monkeytypegame/monkeytype"
+rev = "574d8193498f75d13e7296584c82b64cebe2efea"
+languages = 446
+quotes = 87
+themes = 187
+
+[[files]]
+path = "languages.pack"
+sha256 = "f62ce6f1eda67032a6e9a247cff507c70465b9b530a35f144aa92e566e6116a1"
+
+[[files]]
+path = "quotes.pack"
+sha256 = "557418ab92be1363a6ac189918644e8ba44a982ef848a43e0fae5db0d4c8604d"
+
+[[files]]
+path = "themes.json"
+sha256 = "3ba0c0fef7925c05df32ec09f62b634c111efa11f3f3c188cde0ccdf53787dd4"
+
+[[files]]
+path = "LICENSE (amont)"
+sha256 = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
