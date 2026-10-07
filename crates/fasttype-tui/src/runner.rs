@@ -129,6 +129,14 @@ impl Output {
                 app.palette().caret_rgb,
             )?;
         }
+        if let Some(text) = app.take_clipboard() {
+            // OSC 52 : le terminal copie le texte dans le presse-papiers
+            write!(
+                self.term.backend_mut(),
+                "\x1b]52;c;{}\x07",
+                crate::kitty::base64(text.as_bytes())
+            )?;
+        }
         queue!(self.term.backend_mut(), EndSynchronizedUpdate)?;
         self.frame.present(&mut io::stdout())
     }

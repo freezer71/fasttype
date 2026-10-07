@@ -6,7 +6,7 @@ use fasttype_tui::input::{Input, Key, map_event, map_key};
 use fasttype_tui::palette::filter::{filter, split_words};
 use fasttype_tui::palette::lists::{Context, root};
 use fasttype_tui::palette::state::{Outcome, PaletteState, parse_input};
-use fasttype_tui::palette::{Action, AppAction, Subgroup};
+use fasttype_tui::palette::{Action, AppAction, InputTarget, Subgroup};
 use toml::Value;
 
 fn words(labels: &[&str]) -> Vec<Vec<String>> {
@@ -56,6 +56,7 @@ fn ctx_root(config: &fasttype_store::Config, on_result: bool, bail: bool) -> Sub
     let themes = ["dracula", "serika_dark"];
     root(&Context {
         config,
+        custom_text: "hello world",
         on_result,
         can_bail_out: bail,
         languages: &languages,
@@ -112,7 +113,10 @@ fn subgroups_list_values_with_the_current_one_checked() {
     let time = sub(&r, "Time...");
     assert_eq!(labels(time), ["15", "30", "60", "120", "custom..."]);
     assert!(time.list[1].active, "30 par défaut");
-    assert_eq!(time.list[4].action, Action::Input { key: "time" });
+    assert_eq!(
+        time.list[4].action,
+        Action::Input(InputTarget::Config("time"))
+    );
     let punct = sub(&r, "Punctuation...");
     assert_eq!(labels(punct), ["off", "on"]);
     let lang = sub(&r, "Language...");
@@ -125,7 +129,7 @@ fn subgroups_list_values_with_the_current_one_checked() {
     assert!(quote.list[2].active, "medium par défaut");
     // les nombres libres s'éditent directement
     let font = r.list.iter().find(|c| c.display == "Font size...").unwrap();
-    assert_eq!(font.action, Action::Input { key: "fontSize" });
+    assert_eq!(font.action, Action::Input(InputTarget::Config("fontSize")));
 }
 
 #[test]
@@ -326,10 +330,62 @@ fn aliases_from_the_site() {
         p.shown().0.iter().map(|c| c.display.clone()).collect()
     };
     assert_eq!(find("words", false), ["Word count..."]);
-    assert_eq!(find("quotes", false), ["Quote length..."]);
+    assert_eq!(
+        find("quotes", false),
+        ["Quote length...", "Search for quotes"]
+    );
     assert!(find("wpm", false).contains(&"Live speed style...".to_string()));
     assert!(find("timer", false).contains(&"Live progress style...".to_string()));
     assert!(find("page", false).contains(&"Max line width...".to_string()));
     assert!(find("restart", true).contains(&"Next test".to_string()));
     assert!(find("opacity", false).contains(&"Live progress opacity...".to_string()));
+}
+
+#[test]
+fn custom_text_and_settings_entries() {
+    let a = app("pal-extra", "");
+    let c = &a.store.config;
+    let r = ctx_root(c, false, false);
+    let l = labels(&r);
+    for want in [
+        "Change custom text",
+        "Search for quotes",
+        "Import settings",
+        "Export settings",
+    ] {
+        assert!(l.contains(&want), "{want}");
+    }
+    // le texte custom part du texte en cours ; vide : refusé
+    let mut p = PaletteState::open(r);
+    "custom text".chars().for_each(|ch| {
+        p.key(Key::Char(ch), c);
+    });
+    p.key(Key::Enter, c);
+    assert_eq!(p.input().unwrap().text, "hello world");
+    for _ in 0..11 {
+        p.key(Key::Backspace, c);
+    }
+    assert_eq!(p.key(Key::Enter, c), Outcome::Stay);
+    assert_eq!(
+        p.input().unwrap().error.as_deref(),
+        Some("Must not be empty")
+    );
+    p.paste("one\ntwo");
+    assert_eq!(
+        p.key(Key::Enter, c),
+        Outcome::Run(Action::App(AppAction::SetCustomText("one two".into())))
+    );
+    // l'import garde les sauts de ligne du TOML collé
+    let mut p = PaletteState::open(ctx_root(c, false, false));
+    "import".chars().for_each(|ch| {
+        p.key(Key::Char(ch), c);
+    });
+    p.key(Key::Enter, c);
+    p.paste("time = 60\ntheme = \"dracula\"\n");
+    assert_eq!(
+        p.key(Key::Enter, c),
+        Outcome::Run(Action::App(AppAction::ImportSettings(
+            "time = 60\ntheme = \"dracula\"\n".into()
+        )))
+    );
 }

@@ -3,7 +3,7 @@
 //! renvoie l'action choisie à `App`.
 
 use super::filter::filter;
-use super::{Action, Command, Subgroup};
+use super::{Action, AppAction, Command, InputTarget, Subgroup};
 use crate::input::Key;
 use fasttype_store::Config;
 use fasttype_store::schema::{Kind, key_def};
@@ -23,7 +23,7 @@ pub enum Outcome {
 /// Saisie d'une valeur libre (« custom... »).
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputMode {
-    pub key: &'static str,
+    pub target: InputTarget,
     pub title: String,
     pub text: String,
     /// Message sous la saisie quand la valeur est refusée.
@@ -164,7 +164,15 @@ impl PaletteState {
         }
     }
 
-    /// Texte collé (bracketed paste) : ajouté à la saisie en cours.
+    /// Ouvre un sous-groupe construit à la demande (« Search for quotes »).
+    pub fn push(&mut self, group: Subgroup) {
+        self.stack.push(group);
+        self.query.clear();
+        self.refresh();
+    }
+
+    /// Texte collé (bracketed paste). Les sauts de ligne deviennent des
+    /// espaces, sauf dans un import de réglages (TOML).
     pub fn paste(&mut self, text: &str) {
         let flat: String = text
             .chars()
@@ -175,7 +183,11 @@ impl PaletteState {
                 if std::mem::take(&mut m.selected) {
                     m.text.clear();
                 }
-                m.text.push_str(&flat);
+                if m.target == InputTarget::ImportSettings {
+                    m.text.push_str(text);
+                } else {
+                    m.text.push_str(&flat);
+                }
                 m.error = None;
             }
             None => {
@@ -235,11 +247,16 @@ impl PaletteState {
                         self.refresh();
                         Outcome::Stay
                     }
-                    Action::Input { key } => {
+                    Action::Input(target) => {
+                        let text = match &target {
+                            InputTarget::Config(key) => current_text(config, key),
+                            InputTarget::CustomText(current) => current.clone(),
+                            InputTarget::ImportSettings => String::new(),
+                        };
                         self.input = Some(InputMode {
-                            key,
+                            target,
                             title: cmd.display.clone(),
-                            text: current_text(config, key),
+                            text,
                             error: None,
                             selected: true,
                         });
@@ -281,13 +298,28 @@ impl PaletteState {
                 m.error = None;
                 Outcome::Stay
             }
-            Key::Enter | Key::ShiftEnter => match parse_input(m.key, &m.text) {
-                Ok(value) => Outcome::Run(Action::Set { key: m.key, value }),
-                Err(e) => {
-                    m.error = Some(e);
-                    Outcome::Stay
+            Key::Enter | Key::ShiftEnter => {
+                let text = m.text.trim();
+                let done = match &m.target {
+                    InputTarget::Config(key) => {
+                        parse_input(key, &m.text).map(|value| Action::Set { key, value })
+                    }
+                    _ if text.is_empty() => Err("Must not be empty".to_string()),
+                    InputTarget::CustomText(_) => {
+                        Ok(Action::App(AppAction::SetCustomText(text.to_string())))
+                    }
+                    InputTarget::ImportSettings => {
+                        Ok(Action::App(AppAction::ImportSettings(m.text.clone())))
+                    }
+                };
+                match done {
+                    Ok(action) => Outcome::Run(action),
+                    Err(e) => {
+                        m.error = Some(e);
+                        Outcome::Stay
+                    }
                 }
-            },
+            }
             _ => Outcome::Stay,
         }
     }

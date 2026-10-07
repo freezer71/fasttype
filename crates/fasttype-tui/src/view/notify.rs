@@ -1,4 +1,6 @@
-//! Notifications en pile en haut à droite (3 s ; 6 s pour les erreurs).
+//! Notifications en pile en haut à droite (`states/notifications.ts`) : 3 s,
+//! et les erreurs restent jusqu'à « Clear all notifications ». Pendant la
+//! frappe, seules les erreurs restent visibles.
 
 use crate::theme::Palette;
 use ratatui::buffer::Buffer;
@@ -28,7 +30,7 @@ impl Notifications {
     pub fn push(&mut self, text: impl Into<String>, level: Level, now: f64) {
         let ttl = match level {
             Level::Notice => 3000.0,
-            Level::Error => 6000.0,
+            Level::Error => f64::INFINITY,
         };
         self.items.insert(
             0,
@@ -51,15 +53,24 @@ impl Notifications {
     }
 
     pub fn next_expiry(&self) -> Option<f64> {
-        self.items.iter().map(|n| n.until).min_by(f64::total_cmp)
+        self.items
+            .iter()
+            .map(|n| n.until)
+            .filter(|t| t.is_finite())
+            .min_by(f64::total_cmp)
     }
 
     pub fn items(&self) -> &[Notification] {
         &self.items
     }
 
-    pub fn render(&self, buf: &mut Buffer, area: Rect, palette: &Palette) {
-        for (i, n) in self.items.iter().enumerate() {
+    /// Dessine la pile ; `typing` : seules les erreurs restent visibles.
+    pub fn render(&self, buf: &mut Buffer, area: Rect, palette: &Palette, typing: bool) {
+        let shown = self
+            .items
+            .iter()
+            .filter(|n| !typing || n.level == Level::Error);
+        for (i, n) in shown.enumerate() {
             let y = area.y + 1 + i as u16;
             if y >= area.bottom() {
                 break;

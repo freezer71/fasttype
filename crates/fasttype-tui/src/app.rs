@@ -14,8 +14,9 @@ use crate::input::{Input, Key, Phase};
 use crate::kitty::CaretRenderer;
 use crate::layout::{Layout, char_width, layout_window, letters};
 use crate::palette::state::{Outcome, PaletteState};
-use crate::palette::{Action, AppAction, lists, lists::Context};
+use crate::palette::{Action, AppAction, Command, Subgroup, lists, lists::Context};
 use crate::perf::Perf;
+use crate::session_factory::DEFAULT_CUSTOM_TEXT;
 use crate::session_factory::SessionFactory;
 use crate::sized::{ScaledCell, ScaledText, scale_for};
 use crate::theme::{ColorMode, Palette, Rgb, mix};
@@ -26,6 +27,7 @@ use crate::view::palette as palette_view;
 use crate::view::result::{ResultView, invalid_label, unit_factor};
 use crate::view::test::{Chrome, WordsView, words_box};
 use crate::view::{MIN_HEIGHT, MIN_WIDTH, fill_background, too_small};
+use fasttype_core::quote::QuoteFile;
 use fasttype_core::result::TestResult;
 use fasttype_core::session::{InputOutcome, SessionState, TestSession};
 use fasttype_core::spec::Mode;
@@ -63,6 +65,23 @@ fn can_bail_out(spec: &fasttype_core::spec::TestSpec) -> bool {
         (Mode::Custom, Some(CustomLimit::Word(n) | CustomLimit::Section(n))) => big(n, 5000),
         _ => false,
     }
+}
+
+/// Nom du texte custom en cours dans `custom_texts/`.
+pub const CURRENT_CUSTOM_TEXT: &str = "current";
+
+/// Citations d'une langue dans la palette : le début du texte, la source en alias.
+fn quote_commands(file: &QuoteFile) -> Vec<Command> {
+    file.quotes
+        .iter()
+        .map(|q| {
+            let mut text: String = q.text.chars().take(64).collect();
+            if q.text.chars().count() > 64 {
+                text.push('…');
+            }
+            Command::new(text, Action::App(AppAction::SelectQuote(q.id))).alias(&q.source)
+        })
+        .collect()
 }
 
 /// Durée des fondus (test, résultat, restart, stats en direct, focus mode).
@@ -167,6 +186,10 @@ pub struct App {
     color_mode: ColorMode,
     /// Le prochain restart rejoue le même texte (« Repeat test »).
     repeat_next: bool,
+    /// Langue décompressée dans un thread ; le test suivant démarre à la fin.
+    loading: Option<(String, std::thread::JoinHandle<()>)>,
+    /// Réglages exportés, à copier dans le presse-papiers par la boucle.
+    clipboard: Option<String>,
     /// Avertissements déjà montrés : un repli n'est signalé qu'une fois.
     warned: HashSet<String>,
 }
@@ -269,6 +292,7 @@ impl App {
     pub fn new(store: Store, color_mode: ColorMode, now: f64, seed: u64) -> App {
         let (theme, theme_warnings) = resolve_theme(&store.config);
         let mut factory = SessionFactory::new();
+        factory.custom_text = store.custom_texts.load(CURRENT_CUSTOM_TEXT).ok();
         let built = factory.build(&store.config, seed);
         let mut app = App {
             palette: Palette::from_theme(&theme, color_mode),
@@ -303,6 +327,8 @@ impl App {
             saved_palette: None,
             color_mode,
             repeat_next: false,
+            loading: None,
+            clipboard: None,
             warned: HashSet::new(),
             store,
         };
@@ -385,8 +411,14 @@ impl App {
         let spec = self.session.spec();
         let running =
             matches!(self.screen, Screen::Test) && self.session.state() == SessionState::Running;
+        let custom_text = self
+            .factory
+            .custom_text
+            .as_deref()
+            .unwrap_or(DEFAULT_CUSTOM_TEXT);
         let ctx = Context {
             config: &self.store.config,
+            custom_text,
             on_result: matches!(self.screen, Screen::Result(_)),
             can_bail_out: running && can_bail_out(spec),
             languages: &languages,
@@ -412,6 +444,25 @@ impl App {
                 self.preview_theme(hovered.as_deref());
             }
             Outcome::Close => self.close_palette(),
+            Outcome::Run(Action::App(AppAction::SearchQuotes)) => {
+                // liste construite à la demande : des milliers de citations
+                let language = self.store.config.str("language").to_string();
+                let list = self.factory.quotes(&language).map(|f| quote_commands(&f));
+                match (list, &mut self.command_line) {
+                    (Some(list), Some(p)) if !list.is_empty() => p.push(Subgroup {
+                        title: "Search for quotes".into(),
+                        list,
+                    }),
+                    _ => {
+                        self.notifications.push(
+                            format!("no quotes for {language}"),
+                            Level::Notice,
+                            now,
+                        );
+                        self.close_palette();
+                    }
+                }
+            }
             Outcome::Run(action) => {
                 self.command_line = None;
                 self.saved_palette = None;
@@ -421,6 +472,40 @@ impl App {
                     Palette::from_theme(&resolve_theme(&self.store.config).0, self.color_mode);
             }
         }
+    }
+
+    fn save_settings(&mut self, now: f64) {
+        if let Err(e) = self.store.save_config() {
+            self.notifications.push(
+                format!("could not save the settings: {e}"),
+                Level::Error,
+                now,
+            );
+        }
+    }
+
+    /// Relance un test, après avoir décompressé la langue dans un thread si
+    /// elle n'est pas encore en mémoire (« loading... » sur le badge).
+    fn restart_when_ready(&mut self, now: f64) {
+        let language = self.store.config.str("language").to_string();
+        if fasttype_data::language_names().is_ok_and(|n| n.contains(&language.as_str()))
+            && !self.factory.language_ready(&language)
+        {
+            let handle = self.factory.preload(&language);
+            self.loading = Some((language, handle));
+            return;
+        }
+        self.try_restart(now, true);
+    }
+
+    /// Réglages à copier dans le presse-papiers (OSC 52), une seule fois.
+    pub fn take_clipboard(&mut self) -> Option<String> {
+        self.clipboard.take()
+    }
+
+    /// Langue en cours de chargement.
+    pub fn loading(&self) -> Option<&str> {
+        self.loading.as_ref().map(|(l, _)| l.as_str())
     }
 
     /// Aperçu d'un thème au survol ; `None` remet le thème en cours.
@@ -449,18 +534,12 @@ impl App {
                     if key == "theme" {
                         let _ = self.store.config.set("customTheme", Value::Boolean(false));
                     }
-                    if let Err(e) = self.store.save_config() {
-                        self.notifications.push(
-                            format!("could not save the settings: {e}"),
-                            Level::Error,
-                            now,
-                        );
-                    }
+                    self.save_settings(now);
                     // `afterExec: restart` : même si la valeur ne change pas
                     if RESTART_KEYS.contains(&key)
                         || changed.iter().any(|k| RESTART_KEYS.contains(k))
                     {
-                        self.try_restart(now, true);
+                        self.restart_when_ready(now);
                     }
                 }
                 Err(_) => {
@@ -479,7 +558,52 @@ impl App {
             }
             Action::App(AppAction::ClearNotifications) => self.notifications.clear(),
             Action::App(AppAction::Quit) => self.quit = true,
-            Action::Open(_) | Action::Input { .. } | Action::Close => {}
+            Action::App(AppAction::SearchQuotes) => {}
+            Action::App(AppAction::SelectQuote(id)) => {
+                // `quoteLength = [-2]` : la citation choisie, à chaque restart
+                self.factory.selected_quote = Some(id);
+                let lengths = Value::Array(vec![Value::Integer(-2)]);
+                if self.store.config.set("quoteLength", lengths).is_ok() {
+                    self.save_settings(now);
+                }
+                self.try_restart(now, true);
+            }
+            Action::App(AppAction::SetCustomText(text)) => {
+                if let Err(e) = self.store.custom_texts.save(CURRENT_CUSTOM_TEXT, &text) {
+                    self.notifications.push(
+                        format!("could not save the custom text: {e}"),
+                        Level::Error,
+                        now,
+                    );
+                }
+                self.factory.custom_text = Some(text);
+                if self
+                    .store
+                    .config
+                    .set("mode", Value::String("custom".into()))
+                    .is_ok()
+                {
+                    self.save_settings(now);
+                }
+                self.try_restart(now, true);
+            }
+            Action::App(AppAction::ExportSettings) => {
+                self.clipboard = Some(self.store.config.to_toml());
+                self.notifications
+                    .push("Settings copied to clipboard", Level::Notice, now);
+            }
+            Action::App(AppAction::ImportSettings(text)) => {
+                let (config, warnings) = Config::from_toml(&text);
+                for w in warnings {
+                    self.notifications.push(w.to_string(), Level::Error, now);
+                }
+                self.store.config = config;
+                self.save_settings(now);
+                self.notifications
+                    .push("Settings imported", Level::Notice, now);
+                self.restart_when_ready(now);
+            }
+            Action::Open(_) | Action::Input(_) | Action::Close => {}
         }
         self.update_motion(now);
     }
@@ -722,6 +846,10 @@ impl App {
         if self.line_fade.is_some_and(|t| now >= t + FADE_MS) {
             self.line_fade = None;
         }
+        if self.loading.as_ref().is_some_and(|(_, h)| h.is_finished()) {
+            self.loading = None;
+            self.try_restart(now, true);
+        }
         self.notifications.expire(now);
         self.update_motion(now);
     }
@@ -803,7 +931,9 @@ impl App {
 
     /// Une image change-t-elle sans frappe (hors clignotement) ?
     fn animating(&self, now: f64) -> bool {
-        self.transition.is_some()
+        // une langue se charge : on regarde à chaque image si c'est fini
+        self.loading.is_some()
+            || self.transition.is_some()
             || self.caret.is_moving(now)
             || self.line_fade.is_some()
             || self.chrome.is_running(now)
@@ -998,7 +1128,10 @@ impl App {
             words_top: self.words_top,
         }
         .render(buf, area);
-        self.notifications.render(buf, area, &self.palette);
+        let typing = matches!(self.screen, Screen::Test)
+            && self.session.state() == SessionState::Running
+            && self.command_line.is_none();
+        self.notifications.render(buf, area, &self.palette, typing);
         if let Some(p) = &self.command_line {
             // pendant l'aperçu d'un thème, pas de voile : ses vraies couleurs
             let veil = self.saved_palette.is_none();
@@ -1100,7 +1233,10 @@ impl App {
             .map(|(y, _)| y)
             .filter(|y| y + 1 < words.top);
         if badge > 0.0 && badge_row > area.y + 1 && bar_row.is_none_or(|b| b < badge_row) {
-            let name = self.session.spec().language.replace('_', " ");
+            let name = match &self.loading {
+                Some(_) => "loading...".to_string(),
+                None => self.session.spec().language.replace('_', " "),
+            };
             let x = area.x + area.width.saturating_sub(name.width() as u16) / 2;
             let fg = self.palette.over_bg(self.palette.rgb.sub, badge);
             buf.set_string(x, badge_row, &name, Style::default().fg(fg));

@@ -3,7 +3,7 @@
 //! majuscule et « ... » ; dans un sous-groupe, `on`/`off` ou la valeur, `off`
 //! en premier.
 
-use super::{Action, AppAction, Command, Subgroup};
+use super::{Action, AppAction, Command, InputTarget, Subgroup};
 use fasttype_store::Config;
 use fasttype_store::schema::{Kind, key_def};
 use toml::Value;
@@ -11,6 +11,8 @@ use toml::Value;
 /// État de l'application utile aux listes.
 pub struct Context<'a> {
     pub config: &'a Config,
+    /// Texte du mode custom en cours (point de départ de « Change custom text »).
+    pub custom_text: &'a str,
     /// L'écran de résultat est affiché (entrées Next test, Repeat test).
     pub on_result: bool,
     /// Un test long ou zen est en cours (`canBailOut`).
@@ -79,7 +81,7 @@ fn set(key: &'static str, value: Value, config: &Config) -> Command {
 }
 
 fn custom(key: &'static str) -> Command {
-    Command::new("custom...", Action::Input { key })
+    Command::new("custom...", Action::Input(InputTarget::Config(key)))
 }
 
 /// Sous-groupe d'une clé : ses valeurs (`off` en premier) et, pour les
@@ -172,7 +174,7 @@ fn key_command(key: &'static str, ctx: &Context) -> Command {
     let title = label(key);
     let list = values(key, ctx);
     if list.is_empty() {
-        return Command::new(title, Action::Input { key }).alias(alias(key));
+        return Command::new(title, Action::Input(InputTarget::Config(key))).alias(alias(key));
     }
     Command::new(
         title.clone(),
@@ -198,6 +200,16 @@ pub fn root(ctx: &Context) -> Subgroup {
     }
     for group in [TEST, BEHAVIOR, CARET, APPEARANCE, THEME, SHOW_HIDE] {
         list.extend(group.iter().map(|k| key_command(k, ctx)));
+        if group == TEST {
+            list.push(Command::new(
+                "Change custom text",
+                Action::Input(InputTarget::CustomText(ctx.custom_text.to_string())),
+            ));
+            list.push(Command::new(
+                "Search for quotes",
+                Action::App(AppAction::SearchQuotes),
+            ));
+        }
         if group == TEST && ctx.can_bail_out {
             list.push(Command::new(
                 "Bail out...",
@@ -218,6 +230,14 @@ pub fn root(ctx: &Context) -> Subgroup {
         )
         .alias("dismiss"),
     );
+    list.push(Command::new(
+        "Import settings",
+        Action::Input(InputTarget::ImportSettings),
+    ));
+    list.push(Command::new(
+        "Export settings",
+        Action::App(AppAction::ExportSettings),
+    ));
     list.push(Command::new("Quit", Action::App(AppAction::Quit)).alias("exit close"));
     Subgroup {
         title: "Search...".into(),

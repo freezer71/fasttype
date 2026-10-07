@@ -1,10 +1,11 @@
 """Lance fasttype dans un pseudo-terminal, tape un test custom complet, quitte.
-Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sized] [--silent] [--palette] [--sigterm]
+Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sized] [--silent] [--palette] [--export] [--sigterm]
   --kitty    le terminal répond OK à la sonde graphique Kitty (cases de 10 × 20 pixels)
   --sized    le terminal agrandit le texte (OSC 66, Kitty ≥ 0.40)
   --silent   le terminal ne répond à aucune sonde (ni position, ni DA1) : chaque
              sonde doit abandonner au bout de 300 ms
   --palette  quitte par la palette de commandes (Échap, « quit », Entrée)
+  --export   exporte les réglages depuis la palette (OSC 52), puis Ctrl+C
   --sigterm  quitte par SIGTERM au lieu de Ctrl+C"""
 import fcntl, os, pty, re, select, signal, struct, sys, termios, time
 
@@ -12,7 +13,7 @@ binary, home = sys.argv[1], sys.argv[2]
 flags = sys.argv[3:]
 perf, kitty, sigterm = "--perf" in flags, "--kitty" in flags, "--sigterm" in flags
 sized, silent = "--sized" in flags, "--silent" in flags
-palette = "--palette" in flags
+palette, export = "--palette" in flags, "--export" in flags
 probe_at, keyboard_at = None, None
 os.makedirs(f"{home}/.config/fasttype", exist_ok=True)
 with open(f"{home}/.config/fasttype/config.toml", "w") as f:
@@ -77,6 +78,14 @@ for ch in "The quick brown fox jumps over the lazy dog":
     pump(0.08)
 pump(0.8)
 screen = plain(bytes(out))
+if export:
+    os.write(fd, b"\x1b")
+    pump(0.3)
+    for ch in "export":
+        os.write(fd, ch.encode())
+        pump(0.05)
+    os.write(fd, b"\r")
+    pump(0.3)
 if sigterm:
     os.kill(pid, signal.SIGTERM)
 elif palette:
@@ -103,6 +112,11 @@ if kitty:
     print("kitty images deleted:", out.rstrip().find(b"\x1b_Ga=d,d=A,q=2\x1b\\") > out.find(b"\x1b_Ga=p,"))
 if palette:
     print("command line shown:", palette_seen)
+if export:
+    import base64
+    found = re.search(rb"\x1b\]52;c;([A-Za-z0-9+/=]+)\x07", bytes(out))
+    copied = base64.b64decode(found.group(1)).decode() if found else ""
+    print("settings copied (OSC 52):", 'mode = "custom"' in copied)
 if silent:
     wait = (keyboard_at - probe_at) * 1000 if probe_at and keyboard_at else None
     print("probes gave up after (ms):", round(wait) if wait else None)

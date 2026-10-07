@@ -15,21 +15,40 @@ pub enum Action {
     Set { key: &'static str, value: Value },
     /// Ouvre un sous-groupe.
     Open(Subgroup),
-    /// Demande une valeur libre pour une clé (« custom... »).
-    Input { key: &'static str },
+    /// Demande une valeur libre (« custom... », texte custom, import).
+    Input(InputTarget),
     /// Action propre à l'application.
     App(AppAction),
     /// Ne fait rien et ferme la palette (« Nevermind »).
     Close,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Ce que remplit une saisie libre.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputTarget {
+    /// Une clé de config (nombre libre).
+    Config(&'static str),
+    /// Le texte du mode custom ; la saisie part du texte en cours.
+    CustomText(String),
+    /// Des réglages au format TOML (collés).
+    ImportSettings,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppAction {
     NextTest,
     RepeatTest,
     BailOut,
     ClearNotifications,
     Quit,
+    /// Ouvre la liste des citations de la langue (construite à la demande).
+    SearchQuotes,
+    /// Lance la citation choisie.
+    SelectQuote(u32),
+    SetCustomText(String),
+    /// Copie les réglages (TOML) dans le presse-papiers.
+    ExportSettings,
+    ImportSettings(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
