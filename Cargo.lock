@@ -606,6 +606,7 @@ dependencies = [
  "libc",
  "ratatui",
  "signal-hook",
+ "toml",
  "unicode-width",
 ]
 

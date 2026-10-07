@@ -12,6 +12,7 @@ fasttype-store.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 unicode-width.workspace = true
+toml.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 signal-hook.workspace = true

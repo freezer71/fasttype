@@ -19,6 +19,12 @@ pub enum Key {
     /// Shift + Entrée (signalé seulement avec le protocole clavier Kitty).
     ShiftEnter,
     Esc,
+    /// Flèche haut, Ctrl+K, Ctrl+P (navigation dans la palette).
+    Up,
+    /// Flèche bas, Ctrl+J, Ctrl+N.
+    Down,
+    /// Ctrl+Shift+P : ouvre la palette (avec le protocole clavier Kitty).
+    Palette,
     /// Ctrl+C.
     Quit,
 }
@@ -30,7 +36,7 @@ pub enum Phase {
     Release,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Input {
     Key {
         key: Key,
@@ -41,6 +47,8 @@ pub enum Input {
     Resize,
     /// SIGTERM, SIGHUP, SIGINT ou SIGQUIT reçu : quitter proprement.
     Interrupt,
+    /// Texte collé (bracketed paste) : arrive d'un bloc, sauts de ligne compris.
+    Paste(String),
 }
 
 impl Input {
@@ -48,7 +56,7 @@ impl Input {
     pub fn at(&self) -> Option<f64> {
         match self {
             Input::Key { at, .. } => Some(*at),
-            Input::Resize | Input::Interrupt => None,
+            Input::Resize | Input::Interrupt | Input::Paste(_) => None,
         }
     }
 }
@@ -64,6 +72,11 @@ pub fn map_key(ev: &KeyEvent) -> Option<(Key, u32)> {
     let shift = ev.modifiers.contains(KeyModifiers::SHIFT);
     let key = match ev.code {
         KeyCode::Char('c') if ctrl => Key::Quit,
+        KeyCode::Char('p' | 'P') if ctrl && shift => Key::Palette,
+        KeyCode::Char('k' | 'p') if ctrl => Key::Up,
+        KeyCode::Char('j' | 'n') if ctrl => Key::Down,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
         KeyCode::Char('w' | 'h') if ctrl => Key::DeleteWord,
         KeyCode::Backspace if ctrl || alt => Key::DeleteWord,
         KeyCode::Backspace => Key::Backspace,
@@ -82,6 +95,9 @@ pub fn map_key(ev: &KeyEvent) -> Option<(Key, u32)> {
         Key::Enter | Key::ShiftEnter => CODE_BASE + 3,
         Key::Esc => CODE_BASE + 4,
         Key::Quit => CODE_BASE + 5,
+        Key::Up => CODE_BASE + 6,
+        Key::Down => CODE_BASE + 7,
+        Key::Palette => CODE_BASE + 8,
     };
     Some((key, code))
 }
@@ -103,6 +119,7 @@ pub fn map_event(ev: Event, at: f64) -> Option<Input> {
             })
         }
         Event::Resize(..) => Some(Input::Resize),
+        Event::Paste(text) => Some(Input::Paste(text)),
         _ => None,
     }
 }
