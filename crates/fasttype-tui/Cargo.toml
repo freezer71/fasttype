@@ -1,0 +1,17 @@
+[package]
+name = "fasttype-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fasttype-core.workspace = true
+fasttype-data = { workspace = true, features = ["embedded"] }
+fasttype-store.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+unicode-width.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
