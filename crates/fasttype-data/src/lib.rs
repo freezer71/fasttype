@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+mod catalog;
 pub mod language;
 pub mod pack;
 pub mod themes;
@@ -34,3 +35,8 @@ impl fmt::Display for DataError {
 }
 
 impl std::error::Error for DataError {}
+
+pub use catalog::{
+    DEFAULT_LANGUAGE, DEFAULT_THEME, LanguageCache, language_names, load_language,
+    quote_file_names, quotes_for, theme, themes,
+};
