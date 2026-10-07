@@ -2,4 +2,5 @@
 
 pub mod input;
 pub mod layout;
+pub mod perf;
 pub mod theme;
