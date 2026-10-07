@@ -148,3 +148,18 @@ fn reset_restores_defaults() {
     c.reset();
     assert_eq!(c, Config::defaults());
 }
+
+#[test]
+fn overrides_chain_like_monkeytype() {
+    // quoteLength → mode = quote → numbers et punctuation coupés (setConfig récursif)
+    let mut c = Config::defaults();
+    c.set("punctuation", Value::Boolean(true)).unwrap();
+    let changed = c
+        .set(
+            "quoteLength",
+            toml::from_str::<toml::Table>("v = [2]").unwrap()["v"].clone(),
+        )
+        .unwrap();
+    assert_eq!(changed, ["quoteLength", "mode", "punctuation"]);
+    assert!(!c.bool("punctuation"));
+}

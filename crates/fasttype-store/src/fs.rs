@@ -27,11 +27,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
-/// Charge la config. Fichier absent : défauts sans avertissement. TOML cassé :
-/// défauts, et le fichier est déplacé vers `config.toml.bak` pour ne rien perdre.
+/// Charge la config. Fichier absent : défauts sans avertissement. Dès que le
+/// fichier n'est pas relu tel quel (TOML cassé, pas en UTF-8, clé inconnue ou
+/// invalide), l'original est conservé dans `config.toml.bak` : la prochaine
+/// sauvegarde réécrira `config.toml`, et rien de ce qu'a écrit l'utilisateur
+/// ne doit se perdre. Un fichier illisible en entier est déplacé, un fichier
+/// en partie valide est copié.
 pub fn load_config(path: &Path) -> (Config, Vec<String>) {
-    let src = match fs::read_to_string(path) {
-        Ok(s) => s,
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return (Config::defaults(), Vec::new()),
         Err(e) => {
             return (
@@ -43,21 +47,38 @@ pub fn load_config(path: &Path) -> (Config, Vec<String>) {
             );
         }
     };
-    let (config, warnings) = Config::from_toml(&src);
-    let mut messages: Vec<String> = warnings.iter().map(ToString::to_string).collect();
-    if matches!(warnings.first(), Some(crate::ConfigWarning::Syntax(_))) {
-        let bak = path.with_extension("toml.bak");
-        match fs::rename(path, &bak) {
-            Ok(()) => messages.push(format!(
-                "l'ancien fichier est conservé dans {}",
-                bak.display()
-            )),
-            Err(e) => messages.push(format!(
-                "impossible de mettre de côté {} ({e})",
+    let (config, mut messages, unusable) = match std::str::from_utf8(&bytes) {
+        Err(_) => (
+            Config::defaults(),
+            vec![format!(
+                "{} n'est pas en UTF-8 : réglages par défaut",
                 path.display()
-            )),
+            )],
+            true,
+        ),
+        Ok(src) => {
+            let (config, warnings) = Config::from_toml(src);
+            let unusable = matches!(warnings.first(), Some(crate::ConfigWarning::Syntax(_)));
+            (
+                config,
+                warnings.iter().map(ToString::to_string).collect(),
+                unusable,
+            )
         }
+    };
+    if messages.is_empty() {
+        return (config, messages);
     }
+    let bak = path.with_extension("toml.bak");
+    let kept = if unusable {
+        fs::rename(path, &bak)
+    } else {
+        write_atomic(&bak, &bytes)
+    };
+    messages.push(match kept {
+        Ok(()) => format!("l'ancien fichier est conservé dans {}", bak.display()),
+        Err(e) => format!("impossible de mettre de côté {} ({e})", path.display()),
+    });
     (config, messages)
 }
 

@@ -112,6 +112,47 @@ fn config_warnings_surface_in_store() {
     std::fs::create_dir_all(dir.join("config")).unwrap();
     std::fs::write(dir.join("config/config.toml"), "turbo = true\n").unwrap();
     let store = Store::open(paths(&dir));
-    assert_eq!(store.warnings.len(), 1);
+    assert_eq!(store.warnings.len(), 2, "{:?}", store.warnings);
     assert!(store.warnings[0].contains("turbo"));
+    assert!(store.warnings[1].contains("config.toml.bak"));
+}
+
+#[test]
+fn unreadable_history_never_overwrites_pbs() {
+    let dir = scratch("store-unreadable");
+    let p = paths(&dir);
+    std::fs::create_dir_all(p.results_file()).unwrap(); // un dossier à la place du fichier : lecture impossible
+    std::fs::write(p.pbs_file(), "garbage").unwrap();
+    let store = Store::open(p.clone());
+    assert_eq!(
+        std::fs::read_to_string(p.pbs_file()).unwrap(),
+        "garbage",
+        "rien n'est réécrit"
+    );
+    assert_eq!(store.warnings.len(), 1, "{:?}", store.warnings);
+    assert!(
+        store.warnings[0].contains("historique"),
+        "{:?}",
+        store.warnings
+    );
+}
+
+#[test]
+fn missing_pbs_are_rebuilt_from_existing_history() {
+    let dir = scratch("store-missing-pbs");
+    let mut store = Store::open(paths(&dir));
+    store.record(&result("30", 120.0, 1)).unwrap();
+    std::fs::remove_file(paths(&dir).pbs_file()).unwrap();
+    let mut reopened = Store::open(paths(&dir));
+    assert_eq!(
+        reopened
+            .personal_best(&result("30", 0.0, 0).pb_key())
+            .unwrap()
+            .wpm,
+        120.0
+    );
+    assert_eq!(
+        reopened.record(&result("30", 50.0, 2)).unwrap(),
+        RecordOutcome::Saved(PbOutcome::NotBest { best: 120.0 })
+    );
 }

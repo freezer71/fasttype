@@ -56,15 +56,20 @@ impl ResultLog {
     }
 
     pub fn load(&self) -> io::Result<LoadedResults> {
-        let text = match fs::read_to_string(&self.path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        // en octets : une ligne tronquée au milieu d'un caractère UTF-8 ne doit
+        // pas rendre tout le fichier illisible
+        let bytes = match fs::read(&self.path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
         };
         let mut results = Vec::new();
         let mut skipped_lines = 0;
-        for line in text.lines().filter(|l| !l.trim().is_empty()) {
-            match serde_json::from_str(line) {
+        for line in bytes
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.trim_ascii().is_empty())
+        {
+            match serde_json::from_slice(line) {
                 Ok(r) => results.push(r),
                 Err(_) => skipped_lines += 1,
             }

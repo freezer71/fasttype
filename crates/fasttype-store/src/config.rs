@@ -137,7 +137,14 @@ impl Config {
         })?;
         let mut changed = Vec::new();
         self.force(def.name, value, &mut changed);
-        self.apply_overrides(def.name, &mut changed);
+        // Comme `setConfig` récursif de Monkeytype : chaque clé modifiée par un
+        // effet de bord applique à son tour ses propres effets. La table n'a pas
+        // de cycle, et `force` n'ajoute une clé que si sa valeur change.
+        let mut i = 0;
+        while let Some(&key) = changed.get(i) {
+            self.apply_overrides(key, &mut changed);
+            i += 1;
+        }
         Ok(changed)
     }
 

@@ -80,3 +80,29 @@ fn long_chart_is_kept_whole() {
     log.append(&r).unwrap();
     assert_eq!(log.load().unwrap().results[0].chart.wpm.len(), 3600);
 }
+
+#[test]
+fn non_utf8_line_is_skipped_not_fatal() {
+    let dir = scratch("nonutf8-results");
+    let path = dir.join("results.jsonl");
+    let log = ResultLog::new(path.clone());
+    log.append(&result("30", 120.0, 1)).unwrap();
+    // ligne tronquée au milieu d'un caractère UTF-8
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"{\"language\":\"fran\xc3")
+        .unwrap();
+    log.append(&result("30", 90.0, 2)).unwrap();
+    let loaded = log.load().unwrap();
+    assert_eq!(
+        loaded
+            .results
+            .iter()
+            .map(|r| r.timestamp)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert_eq!(loaded.skipped_lines, 1);
+}

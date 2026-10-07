@@ -107,12 +107,37 @@ fn broken_config_is_moved_aside() {
 }
 
 #[test]
-fn partially_invalid_config_is_kept_in_place() {
+fn partially_invalid_config_is_kept_in_place_and_backed_up() {
     let dir = scratch("partial");
     let path = dir.join("config.toml");
-    std::fs::write(&path, "smooth_caret = \"slow\"\nturbo = 1\n").unwrap();
+    let original = "# mes réglages\nsmooth_caret = \"slow\"\nturbo = 1\n";
+    std::fs::write(&path, original).unwrap();
     let (c, warnings) = load_config(&path);
     assert_eq!(c.str("smoothCaret"), "slow");
-    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings[1].contains("config.toml.bak"));
     assert!(path.exists());
+    // la prochaine sauvegarde réécrira le fichier : l'original doit survivre
+    save_config(&path, &c).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("config.toml.bak")).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn non_utf8_config_is_backed_up() {
+    let dir = scratch("nonutf8");
+    let path = dir.join("config.toml");
+    std::fs::write(&path, b"smooth_caret = \"sl\xffow\"\n").unwrap();
+    let (c, warnings) = load_config(&path);
+    assert_eq!(c, Config::defaults());
+    assert!(
+        warnings.iter().any(|w| w.contains("config.toml.bak")),
+        "{warnings:?}"
+    );
+    assert_eq!(
+        std::fs::read(dir.join("config.toml.bak")).unwrap(),
+        b"smooth_caret = \"sl\xffow\"\n"
+    );
 }

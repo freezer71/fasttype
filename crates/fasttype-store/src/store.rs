@@ -27,6 +27,9 @@ pub struct Store {
     pub favorites: FavoriteQuotes,
     results: ResultLog,
     pbs: PersonalBests,
+    /// Faux si les records n'ont pas pu être chargés ni reconstruits : on ne
+    /// réécrit alors jamais leur fichier, pour ne rien perdre.
+    pbs_reliable: bool,
 }
 
 impl Store {
@@ -34,23 +37,20 @@ impl Store {
     pub fn open(paths: Paths) -> Store {
         let (config, mut warnings) = load_config(&paths.config_file());
         let results = ResultLog::new(paths.results_file());
-        let pbs = match PersonalBests::load(&paths.pbs_file()) {
-            Ok(pbs) => pbs,
-            Err(e) => {
-                let rebuilt = results
-                    .load()
-                    .map(|h| PersonalBests::rebuild(&h.results))
-                    .unwrap_or_default();
-                let saved = rebuilt.save(&paths.pbs_file());
-                warnings.push(format!(
-                    "records personnels illisibles ({e}) : reconstruits depuis l'historique{}",
-                    if saved.is_err() {
-                        ", sans pouvoir les réécrire"
-                    } else {
-                        ""
-                    }
-                ));
-                rebuilt
+        let pbs_path = paths.pbs_file();
+        let (pbs, pbs_reliable) = if !pbs_path.exists() && paths.results_file().exists() {
+            // cache absent (supprimé, historique copié d'une autre machine)
+            rebuild_from_history(&results, &pbs_path, None, &mut warnings)
+        } else {
+            match PersonalBests::load(&pbs_path) {
+                Ok(pbs) => (pbs, true),
+                Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                    rebuild_from_history(&results, &pbs_path, Some(e), &mut warnings)
+                }
+                Err(e) => {
+                    warnings.push(format!("records personnels illisibles ({e}) : non chargés"));
+                    (PersonalBests::default(), false)
+                }
             }
         };
         Store {
@@ -61,6 +61,7 @@ impl Store {
             warnings,
             results,
             pbs,
+            pbs_reliable,
         }
     }
 
@@ -78,7 +79,7 @@ impl Store {
         }
         self.results.append(r)?;
         let outcome = self.pbs.update(r);
-        if matches!(outcome, PbOutcome::NewBest { .. }) {
+        if self.pbs_reliable && matches!(outcome, PbOutcome::NewBest { .. }) {
             self.pbs.save(&self.paths.pbs_file())?;
         }
         Ok(RecordOutcome::Saved(outcome))
@@ -98,6 +99,44 @@ impl Store {
         let history = self.results.load()?;
         self.pbs = PersonalBests::rebuild(&history.results);
         self.pbs.save(&self.paths.pbs_file())?;
+        self.pbs_reliable = true;
         Ok(history)
+    }
+}
+
+/// Recalcule les records depuis l'historique et les réécrit. Si l'historique
+/// est illisible, rien n'est écrit et les records restent vides en mémoire.
+fn rebuild_from_history(
+    results: &ResultLog,
+    pbs_path: &std::path::Path,
+    cause: Option<io::Error>,
+    warnings: &mut Vec<String>,
+) -> (PersonalBests, bool) {
+    let what = match &cause {
+        Some(e) => format!("records personnels illisibles ({e})"),
+        None => "records personnels absents".to_string(),
+    };
+    match results.load() {
+        Ok(history) => {
+            let rebuilt = PersonalBests::rebuild(&history.results);
+            let saved = rebuilt.save(pbs_path);
+            if cause.is_some() || saved.is_err() {
+                warnings.push(format!(
+                    "{what} : reconstruits depuis l'historique{}",
+                    if saved.is_err() {
+                        ", sans pouvoir les enregistrer"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+            (rebuilt, saved.is_ok())
+        }
+        Err(e) => {
+            warnings.push(format!(
+                "{what} et historique illisible ({e}) : records non chargés, rien n'est réécrit"
+            ));
+            (PersonalBests::default(), false)
+        }
     }
 }
