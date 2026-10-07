@@ -4,6 +4,7 @@ pub mod anim;
 pub mod app;
 pub mod caret;
 pub mod input;
+pub mod kitty;
 pub mod layout;
 pub mod perf;
 pub mod runner;
