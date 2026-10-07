@@ -9,6 +9,7 @@ pub mod layout;
 pub mod perf;
 pub mod runner;
 pub mod session_factory;
+pub mod sized;
 pub mod terminal;
 pub mod theme;
 pub mod view;
