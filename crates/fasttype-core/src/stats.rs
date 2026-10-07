@@ -2,9 +2,12 @@
 //! `frontend/src/ts/test/events/stats.ts`.
 
 use crate::chars::{CharCounts, count_words};
+use crate::event::apply_event;
 use crate::event::{EventKind, EventLog, active_word_index};
+use crate::numbers::calculate_wpm;
 use crate::numbers::{js_round, round2};
 use crate::spec::Mode;
+use std::collections::BTreeMap;
 
 fn last_end_ms(log: &EventLog) -> Option<f64> {
     log.events
@@ -147,4 +150,108 @@ pub fn accuracy(log: &EventLog, until_ms: Option<f64>) -> Accuracy {
         incorrect,
         percentage,
     }
+}
+
+/// `countPerInterval` : nombre d'événements satisfaisant `pred` dans chaque
+/// intervalle `]borne précédente, borne]` (le premier inclut 0 ms).
+fn count_per_interval(log: &EventLog, pred: impl Fn(&EventKind) -> bool) -> (Vec<u32>, Vec<f64>) {
+    let boundaries = timer_boundaries(log);
+    let mut counts = Vec::with_capacity(boundaries.len());
+    let mut idx = 0;
+    for &b in &boundaries {
+        let mut n = 0;
+        while let Some(e) = log.events.get(idx) {
+            if e.ms > b {
+                break;
+            }
+            if pred(&e.kind) {
+                n += 1;
+            }
+            idx += 1;
+        }
+        counts.push(n);
+    }
+    (counts, boundaries)
+}
+
+fn is_insert(kind: &EventKind) -> bool {
+    matches!(kind, EventKind::Insert { .. })
+}
+
+/// `getKeypressesPerSecond` : insertions par seconde.
+pub fn keypresses_per_second(log: &EventLog) -> Vec<u32> {
+    count_per_interval(log, is_insert).0
+}
+
+/// `getBurstHistory` : « raw » de chaque intervalle (série burst du graphique).
+pub fn burst_history(log: &EventLog) -> Vec<f64> {
+    let (counts, boundaries) = count_per_interval(log, is_insert);
+    let mut prev = 0.0;
+    counts
+        .iter()
+        .zip(&boundaries)
+        .map(|(&n, &b)| {
+            let seconds = (b - prev) / 1000.0;
+            prev = b;
+            js_round(calculate_wpm(f64::from(n), seconds))
+        })
+        .collect()
+}
+
+/// `getErrorCountHistory` : insertions incorrectes par intervalle.
+pub fn error_count_history(log: &EventLog) -> Vec<u32> {
+    count_per_interval(log, |k| {
+        matches!(k, EventKind::Insert { correct: false, .. })
+    })
+    .0
+}
+
+/// `getWpmHistory` : wpm cumulé à chaque borne, avec crédit partiel du mot actif.
+pub fn wpm_history(log: &EventLog) -> Vec<f64> {
+    let boundaries = timer_boundaries(log);
+    let mut inputs: BTreeMap<u32, String> = BTreeMap::new();
+    let mut idx = 0;
+    let mut out = Vec::with_capacity(boundaries.len());
+    for &b in &boundaries {
+        while let Some(e) = log.events.get(idx) {
+            if e.ms > b {
+                break;
+            }
+            apply_event(&mut inputs, &e.kind);
+            idx += 1;
+        }
+        let active = active_word_index(&inputs);
+        let c = count_words(
+            inputs
+                .iter()
+                .map(|(&i, s)| (s.as_str(), log.target(i).unwrap_or(s.as_str()), i == active)),
+            true,
+        );
+        out.push(js_round(calculate_wpm(
+            f64::from(c.correct_word),
+            b / 1000.0,
+        )));
+    }
+    out
+}
+
+/// `getAfkDuration` : secondes sans aucun keydown ni événement de saisie.
+pub fn afk_duration(log: &EventLog) -> u32 {
+    let (counts, _) = count_per_interval(log, |k| {
+        matches!(k, EventKind::KeyDown { .. }) || k.word_index().is_some()
+    });
+    counts.iter().filter(|&&c| c == 0).count() as u32
+}
+
+/// AFK de `finish` : aucune insertion pendant les 5 dernières secondes.
+/// Jamais en bail out. (Comme `[].every(...)`, une liste vide vaut AFK.)
+pub fn afk_detected(log: &EventLog) -> bool {
+    if log.context.bailed_out {
+        return false;
+    }
+    keypresses_per_second(log)
+        .iter()
+        .rev()
+        .take(5)
+        .all(|&c| c == 0)
 }
