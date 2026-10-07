@@ -2,8 +2,7 @@
 //! (`input/handlers/*`, `input/helpers/fail-or-finish.ts`, `test/test-logic.ts`).
 //! Chaque action est horodatée par l'appelant (`now`, en ms d'une horloge monotone).
 
-use crate::chars::count_words;
-use crate::chars::normalize_typed;
+use crate::chars::{contains_korean, count_words, normalize_typed};
 use crate::event::{EventContext, EventKind, EventLog};
 use crate::generator::WordGenerator;
 use crate::numbers::{calculate_wpm, js_round};
@@ -83,6 +82,7 @@ impl TestSession {
             }
         }
         s.strip_last_separator_if_done();
+        s.detect_korean();
         s
     }
 
@@ -91,6 +91,7 @@ impl TestSession {
             mode: spec.mode,
             timed: spec.is_timed(),
             bailed_out: false,
+            korean: false,
             target_words: Vec::new(),
         };
         Self {
@@ -113,6 +114,11 @@ impl TestSession {
             end_reason: None,
             repeated: false,
         }
+    }
+
+    /// `koreanStatus` : activé si les mots générés au départ contiennent du coréen.
+    fn detect_korean(&mut self) {
+        self.log.context.korean = self.words.iter().any(|w| contains_korean(w));
     }
 
     fn is_zen(&self) -> bool {
@@ -432,6 +438,7 @@ impl TestSession {
                 )
             }),
             true,
+            self.log.context.korean,
         );
         let s = f64::from(seconds);
         LiveStats {
@@ -475,6 +482,7 @@ impl TestSession {
         for w in self.words {
             s.push_word(w);
         }
+        s.detect_korean();
         s.repeated = true;
         Some(s)
     }

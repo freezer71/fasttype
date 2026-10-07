@@ -57,6 +57,7 @@ fn naive_wpm_history(log: &EventLog) -> Vec<f64> {
                     .iter()
                     .map(|(&i, s)| (s.as_str(), log.target(i).unwrap_or(s.as_str()), i == active)),
                 true,
+                log.context.korean,
             );
             js_round(calculate_wpm(f64::from(c.correct_word), b / 1000.0))
         })

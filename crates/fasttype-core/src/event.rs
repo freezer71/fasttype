@@ -63,6 +63,9 @@ pub struct EventContext {
     /// `isTimedTest`.
     pub timed: bool,
     pub bailed_out: bool,
+    /// `koreanStatus` : les comptes se font en jamo.
+    #[serde(default)]
+    pub korean: bool,
     /// Mots cibles avec leur séparateur. Vide en zen (la cible est alors la saisie).
     pub target_words: Vec<String>,
 }

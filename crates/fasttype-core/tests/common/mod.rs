@@ -19,6 +19,7 @@ impl LogBuilder {
             mode,
             timed,
             bailed_out: false,
+            korean: false,
             target_words: targets.iter().map(|s| s.to_string()).collect(),
         };
         let mut log = EventLog::with_capacity(context, 256);

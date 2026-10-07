@@ -1,7 +1,7 @@
 //! Statistiques calculées depuis le journal, fonction par fonction comme
 //! `frontend/src/ts/test/events/stats.ts`.
 
-use crate::chars::{CharCounts, count_chars, count_words};
+use crate::chars::{CharCounts, count_chars_for, count_words};
 use crate::event::apply_event;
 use crate::event::{EventKind, EventLog, active_word_index};
 use crate::numbers::calculate_wpm;
@@ -117,6 +117,7 @@ pub fn chars(log: &EventLog, count_partial_last_word: bool) -> CharCounts {
             )
         }),
         partial,
+        log.context.korean,
     )
 }
 
@@ -235,9 +236,12 @@ pub fn wpm_history(log: &EventLog) -> Vec<f64> {
         for &w in &dirty {
             let input = inputs[&w].as_str();
             let target = log.target(w).unwrap_or(input);
-            let fresh = count_chars(input, target, false).correct_word;
+            let fresh = count_chars_for(input, target, false, log.context.korean).correct_word;
             not_last_sum = not_last_sum - not_last.insert(w, fresh).unwrap_or(0) + fresh;
-            as_last.insert(w, count_chars(input, target, true).correct_word);
+            as_last.insert(
+                w,
+                count_chars_for(input, target, true, log.context.korean).correct_word,
+            );
         }
         dirty.clear();
         // Les mots après le mot actif sont vides (0) ; le mot actif compte

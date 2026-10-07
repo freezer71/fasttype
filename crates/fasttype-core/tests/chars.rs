@@ -59,6 +59,6 @@ fn count_words_stops_after_last_and_credits_it() {
         ("ca", "cat ", true),
         ("ignored", "x", false),
     ];
-    assert_eq!(count_words(words, true), c(6, 6, 0, 0, 0));
-    assert_eq!(count_words(words, false), c(6, 4, 0, 0, 2));
+    assert_eq!(count_words(words, true, false), c(6, 6, 0, 0, 0));
+    assert_eq!(count_words(words, false, false), c(6, 4, 0, 0, 2));
 }

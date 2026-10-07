@@ -6,6 +6,7 @@ fn log() -> EventLog {
         mode: Mode::Words,
         timed: false,
         bailed_out: false,
+        korean: false,
         target_words: vec!["ab ".into(), "cd".into()],
     };
     let mut log = EventLog::with_capacity(ctx, 16);

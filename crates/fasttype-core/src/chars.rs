@@ -59,13 +59,13 @@ pub fn count_chars(input: &str, target: &str, credit_partial: bool) -> CharCount
 
 /// Additionne `count_chars` mot par mot et s'arrête après le dernier mot
 /// (boucle de `getChars`). Seul le dernier mot peut recevoir le crédit partiel.
-pub fn count_words<'a, I>(words: I, credit_partial_last: bool) -> CharCounts
+pub fn count_words<'a, I>(words: I, credit_partial_last: bool, korean: bool) -> CharCounts
 where
     I: IntoIterator<Item = (&'a str, &'a str, bool)>,
 {
     let mut total = CharCounts::default();
     for (input, target, last) in words {
-        total += count_chars(input, target, last && credit_partial_last);
+        total += count_chars_for(input, target, last && credit_partial_last, korean);
         if last {
             break;
         }
@@ -124,4 +124,127 @@ pub fn normalize_typed(typed: char, target: Option<char>, language: &str) -> cha
         return t;
     }
     if is_space(typed) { ' ' } else { typed }
+}
+
+/// Initiales (jamo de compatibilité), dans l'ordre Unicode des syllabes.
+const CHO: [char; 19] = [
+    'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ',
+    'ㅌ', 'ㅍ', 'ㅎ',
+];
+/// Voyelles médianes.
+const JUNG: [char; 21] = [
+    'ㅏ', 'ㅐ', 'ㅑ', 'ㅒ', 'ㅓ', 'ㅔ', 'ㅕ', 'ㅖ', 'ㅗ', 'ㅘ', 'ㅙ', 'ㅚ', 'ㅛ', 'ㅜ', 'ㅝ', 'ㅞ',
+    'ㅟ', 'ㅠ', 'ㅡ', 'ㅢ', 'ㅣ',
+];
+/// Finales (la première case : pas de finale).
+const JONG: [Option<char>; 28] = [
+    None,
+    Some('ㄱ'),
+    Some('ㄲ'),
+    Some('ㄳ'),
+    Some('ㄴ'),
+    Some('ㄵ'),
+    Some('ㄶ'),
+    Some('ㄷ'),
+    Some('ㄹ'),
+    Some('ㄺ'),
+    Some('ㄻ'),
+    Some('ㄼ'),
+    Some('ㄽ'),
+    Some('ㄾ'),
+    Some('ㄿ'),
+    Some('ㅀ'),
+    Some('ㅁ'),
+    Some('ㅂ'),
+    Some('ㅄ'),
+    Some('ㅅ'),
+    Some('ㅆ'),
+    Some('ㅇ'),
+    Some('ㅈ'),
+    Some('ㅊ'),
+    Some('ㅋ'),
+    Some('ㅌ'),
+    Some('ㅍ'),
+    Some('ㅎ'),
+];
+
+/// Jamo composés tapés en deux touches (`COMPLEX_CONSONANTS` / `COMPLEX_VOWELS`
+/// de hangul-js). Les consonnes doubles (ㄲ, ㄸ…) restent d'un seul tenant.
+fn split_compound(c: char) -> Option<[char; 2]> {
+    Some(match c {
+        'ㄳ' => ['ㄱ', 'ㅅ'],
+        'ㄵ' => ['ㄴ', 'ㅈ'],
+        'ㄶ' => ['ㄴ', 'ㅎ'],
+        'ㄺ' => ['ㄹ', 'ㄱ'],
+        'ㄻ' => ['ㄹ', 'ㅁ'],
+        'ㄼ' => ['ㄹ', 'ㅂ'],
+        'ㄽ' => ['ㄹ', 'ㅅ'],
+        'ㄾ' => ['ㄹ', 'ㅌ'],
+        'ㄿ' => ['ㄹ', 'ㅍ'],
+        'ㅀ' => ['ㄹ', 'ㅎ'],
+        'ㅄ' => ['ㅂ', 'ㅅ'],
+        'ㅘ' => ['ㅗ', 'ㅏ'],
+        'ㅙ' => ['ㅗ', 'ㅐ'],
+        'ㅚ' => ['ㅗ', 'ㅣ'],
+        'ㅝ' => ['ㅜ', 'ㅓ'],
+        'ㅞ' => ['ㅜ', 'ㅔ'],
+        'ㅟ' => ['ㅜ', 'ㅣ'],
+        'ㅢ' => ['ㅡ', 'ㅣ'],
+        _ => return None,
+    })
+}
+
+fn push_jamo(out: &mut String, c: char) {
+    match split_compound(c) {
+        Some([a, b]) => {
+            out.push(a);
+            out.push(b);
+        }
+        None => out.push(c),
+    }
+}
+
+/// `Hangul.disassemble(s).join("")` : chaque syllabe devient ses jamo, et les
+/// jamo composés sont scindés ; les autres caractères sont gardés tels quels.
+pub fn hangul_disassemble(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for c in s.chars() {
+        let code = c as u32;
+        if (0xAC00..=0xD7A3).contains(&code) {
+            let i = code - 0xAC00;
+            push_jamo(&mut out, CHO[(i / 588) as usize]);
+            push_jamo(&mut out, JUNG[((i % 588) / 28) as usize]);
+            if let Some(t) = JONG[(i % 28) as usize] {
+                push_jamo(&mut out, t);
+            }
+        } else {
+            push_jamo(&mut out, c);
+        }
+    }
+    out
+}
+
+/// Détection de `koreanStatus` (test-logic.ts).
+pub fn contains_korean(s: &str) -> bool {
+    s.chars().any(|c| {
+        matches!(c as u32, 0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xD7B0..=0xD7FF)
+    })
+}
+
+/// `countChars`, précédé de la décomposition en jamo quand le test est coréen.
+pub fn count_chars_for(
+    input: &str,
+    target: &str,
+    credit_partial: bool,
+    korean: bool,
+) -> CharCounts {
+    if korean {
+        count_chars(
+            &hangul_disassemble(input),
+            &hangul_disassemble(target),
+            credit_partial,
+        )
+    } else {
+        count_chars(input, target, credit_partial)
+    }
 }
