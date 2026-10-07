@@ -4,7 +4,7 @@ use crate::layout::{Layout, char_width, extras, letters};
 use crate::sized::{ScaledCell, ScaledText};
 use crate::theme::Palette;
 use crate::view::centered_segments;
-use crate::view::config_bar::{bar_groups, bar_width, render_bar};
+use crate::view::config_bar::{bar_layout, render_bar};
 use crate::view::live::WordsBox;
 use fasttype_core::session::TestSession;
 use fasttype_store::Config;
@@ -179,6 +179,8 @@ pub struct Chrome<'a> {
     pub config: &'a Config,
     /// Opacité de la barre de config et des raccourcis.
     pub opacity: f64,
+    /// Haut de la zone de mots : la barre n'y descend jamais (une ligne libre au-dessus).
+    pub words_top: Option<u16>,
     pub tips: &'a str,
 }
 
@@ -194,19 +196,11 @@ impl Chrome<'_> {
             return;
         }
         let p = self.palette.faded(self.opacity);
-        // la barre à côté du logo si elle tient, sinon en dessous, compacte au besoin
-        let full = bar_groups(self.config, false);
-        let bar = if bar_width(&full) <= area.width {
-            full
-        } else {
-            bar_groups(self.config, true)
-        };
-        let y = if bar_width(&bar) + 24 <= area.width {
-            area.y + 1
-        } else {
-            area.y + 3
-        };
-        render_bar(buf, area, y, &bar, &p);
+        if let Some((y, bar)) = bar_layout(self.config, area)
+            && self.words_top.is_none_or(|top| y + 1 < top)
+        {
+            render_bar(buf, area, y, &bar, &p);
+        }
         let key = Style::default().fg(p.sub_alt).bg(p.sub);
         let text = Style::default().fg(p.sub);
         let tips = [

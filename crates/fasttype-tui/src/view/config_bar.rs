@@ -90,6 +90,26 @@ pub fn bar_width(groups: &[Vec<BarItem>]) -> u16 {
     (items + 5 * groups.len().saturating_sub(1) + 4) as u16
 }
 
+/// Place de la barre : à côté du logo (ligne 1) si elle tient, sinon en
+/// dessous (ligne 3), compacte au besoin ; `None` si même compacte elle ne tient pas.
+pub fn bar_layout(c: &Config, area: Rect) -> Option<(u16, Vec<Vec<BarItem>>)> {
+    let full = bar_groups(c, false);
+    let bar = if bar_width(&full) <= area.width {
+        full
+    } else {
+        bar_groups(c, true)
+    };
+    if bar_width(&bar) > area.width {
+        return None;
+    }
+    let y = if bar_width(&bar) + 24 <= area.width {
+        area.y + 1
+    } else {
+        area.y + 3
+    };
+    Some((y, bar))
+}
+
 /// Dessine la barre centrée sur la ligne `y`, sur un fond `subAlt`.
 pub fn render_bar(buf: &mut Buffer, area: Rect, y: u16, groups: &[Vec<BarItem>], p: &Palette) {
     let width = bar_width(groups);

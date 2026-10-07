@@ -17,6 +17,7 @@ use crate::perf::Perf;
 use crate::session_factory::SessionFactory;
 use crate::sized::{ScaledCell, ScaledText, scale_for};
 use crate::theme::{ColorMode, Palette, Rgb, mix};
+use crate::view::config_bar::bar_layout;
 use crate::view::live::{LiveItem, LiveStats, Style3, WordsBox, render_bar, seconds_to_string};
 use crate::view::notify::{Level, Notifications};
 use crate::view::result::{ResultView, invalid_label, unit_factor};
@@ -128,6 +129,8 @@ pub struct App {
     /// Zone des mots agrandis de l'image précédente : à redessiner en entier
     /// quand elle disparaît (ratatui n'y avait rien écrit).
     last_scaled_region: Option<Rect>,
+    /// Haut de la zone de mots du dernier dessin (la barre de config reste au-dessus).
+    words_top: Option<u16>,
     /// Avertissements déjà montrés : un repli n'est signalé qu'une fois.
     warned: HashSet<String>,
 }
@@ -259,6 +262,7 @@ impl App {
             text_sizing: false,
             scaled: None,
             last_scaled_region: None,
+            words_top: None,
             warned: HashSet::new(),
             store,
         };
@@ -750,6 +754,7 @@ impl App {
         let area = frame.area();
         self.caret_frame = None;
         self.scaled = None;
+        self.words_top = None;
         if area.is_empty() {
             return;
         }
@@ -810,6 +815,7 @@ impl App {
             logo,
             config: &self.store.config,
             opacity: chrome_opacity,
+            words_top: self.words_top,
             tips: "restart",
         }
         .render(buf, area);
@@ -884,12 +890,18 @@ impl App {
         .render(buf);
 
         // badge de langue au-dessus des mots, effacé en focus mode comme la barre
+        self.words_top = Some(words.top);
         let badge = self.chrome.value(now) * opacity;
-        if badge > 0.0 && words.top >= area.y + 3 {
+        let badge_row = words.top.saturating_sub(2);
+        // jamais sur la ligne du logo ni sous la barre de config
+        let bar_row = bar_layout(&self.store.config, area)
+            .map(|(y, _)| y)
+            .filter(|y| y + 1 < words.top);
+        if badge > 0.0 && badge_row > area.y + 1 && bar_row.is_none_or(|b| b < badge_row) {
             let name = self.session.spec().language.replace('_', " ");
             let x = area.x + area.width.saturating_sub(name.width() as u16) / 2;
             let fg = self.palette.over_bg(self.palette.rgb.sub, badge);
-            buf.set_string(x, words.top - 2, &name, Style::default().fg(fg));
+            buf.set_string(x, badge_row, &name, Style::default().fg(fg));
         }
         // stats en direct, visibles pendant la frappe
         let live = self.live.value(now) * opacity;

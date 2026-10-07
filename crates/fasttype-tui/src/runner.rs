@@ -117,7 +117,8 @@ impl Output {
         let scaled = app.scaled_text();
         if scaled != self.scaled.as_ref() {
             if let Some(t) = scaled {
-                t.write(self.term.backend_mut())?;
+                // seules les lettres qui ont changé : quelques dizaines d'octets par frappe
+                t.write_changes(self.scaled.as_ref(), self.term.backend_mut())?;
             }
             self.scaled = scaled.cloned();
         }

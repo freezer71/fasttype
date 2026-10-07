@@ -121,3 +121,40 @@ fn language_badge_fades_with_the_chrome() {
     let (buf, _) = render(&mut a, 120, 30);
     assert!(!row(&buf, y).contains("english"), "caché pendant la frappe");
 }
+
+#[test]
+fn the_config_bar_never_covers_the_words() {
+    // 80 × 10 : la barre compacte irait sur la ligne des mots
+    let mut a = app("bar-low", "");
+    let (buf, caret) = render(&mut a, 80, 10);
+    let (_, y) = caret.expect("caret");
+    let first = a.session().word(0).trim_end().to_string();
+    assert!(
+        row(&buf, y).contains(&first),
+        "la ligne du caret montre ses mots"
+    );
+    assert!(
+        !screen_text(&buf).contains("words"),
+        "pas de place pour la barre"
+    );
+}
+
+#[test]
+fn bar_and_language_badge_each_get_their_row() {
+    let mut a = app("badge-rows", "");
+    let (buf, _) = render(&mut a, 80, 16);
+    let bar = (0..16u16)
+        .find(|&y| row(&buf, y).contains("time"))
+        .expect("barre");
+    let badge = (0..16u16)
+        .find(|&y| row(&buf, y).trim() == "english")
+        .expect("badge seul sur sa ligne");
+    assert!(badge > bar);
+    // 80 × 13 : le badge tomberait sur la ligne de la barre : il s'efface
+    let mut a = app("badge-clash", "");
+    let (buf, _) = render(&mut a, 80, 13);
+    let bar = (0..13u16)
+        .find(|&y| row(&buf, y).contains("time"))
+        .expect("barre");
+    assert!(row(&buf, bar).contains("@") && row(&buf, bar).contains("custom"));
+}

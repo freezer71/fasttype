@@ -1,14 +1,17 @@
 """Lance fasttype dans un pseudo-terminal, tape un test custom complet, quitte.
-Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sized] [--sigterm]
+Usage : python3 -I scripts/pty_smoke.py <binaire> <dossier HOME temporaire> [--perf] [--kitty] [--sized] [--silent] [--sigterm]
   --kitty    le terminal répond OK à la sonde graphique Kitty (cases de 10 × 20 pixels)
   --sized    le terminal agrandit le texte (OSC 66, Kitty ≥ 0.40)
+  --silent   le terminal ne répond à aucune sonde (ni position, ni DA1) : chaque
+             sonde doit abandonner au bout de 300 ms
   --sigterm  quitte par SIGTERM au lieu de Ctrl+C"""
 import fcntl, os, pty, re, select, signal, struct, sys, termios, time
 
 binary, home = sys.argv[1], sys.argv[2]
 flags = sys.argv[3:]
 perf, kitty, sigterm = "--perf" in flags, "--kitty" in flags, "--sigterm" in flags
-sized = "--sized" in flags
+sized, silent = "--sized" in flags, "--silent" in flags
+probe_at, keyboard_at = None, None
 os.makedirs(f"{home}/.config/fasttype", exist_ok=True)
 with open(f"{home}/.config/fasttype/config.toml", "w") as f:
     f.write('mode = "custom"\n')
@@ -26,6 +29,7 @@ fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 1000, 600))
 out = bytearray()
 
 def pump(seconds):
+    global probe_at, keyboard_at
     end = time.time() + seconds
     while time.time() < end:
         r, _, _ = select.select([fd], [], [], 0.02)
@@ -38,6 +42,15 @@ def pump(seconds):
         if not data:
             return
         out.extend(data)
+        if probe_at is None and b"a=q" in data:
+            probe_at = time.time()
+        if keyboard_at is None and b"\x1b[?u" in data:
+            keyboard_at = time.time()
+        if silent:
+            # seule la requête du protocole clavier (crossterm) reçoit sa réponse DA1
+            if b"\x1b[?u" in data:
+                os.write(fd, b"\x1b[?62c")
+            continue
         # sonde graphique : OK seulement si l'on joue un terminal Kitty
         if kitty and b"a=q" in data:
             os.write(fd, b"\x1b_Gi=31;OK\x1b\\")
@@ -76,6 +89,9 @@ print("cursor color reset:", b"\x1b]112\x07" in out)
 if kitty:
     print("kitty caret placed:", b"\x1b_Ga=p," in out)
     print("kitty images deleted:", out.rstrip().find(b"\x1b_Ga=d,d=A,q=2\x1b\\") > out.find(b"\x1b_Ga=p,"))
+if silent:
+    wait = (keyboard_at - probe_at) * 1000 if probe_at and keyboard_at else None
+    print("probes gave up after (ms):", round(wait) if wait else None)
 if sized:
     print("scaled words written:", b"\x1b]66;s=2;" in out)
 if perf:
