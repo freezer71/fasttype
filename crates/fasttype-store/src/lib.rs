@@ -2,6 +2,8 @@
 //! textes custom et citations favorites.
 
 pub mod config;
+pub mod fs;
+pub mod paths;
 pub mod schema;
 
 pub use config::{Config, ConfigError, ConfigWarning};
