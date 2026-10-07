@@ -1,4 +1,6 @@
-use fasttype_tui::layout::{extras, layout_words, letters, prefix_cells, word_cells};
+use fasttype_tui::layout::{
+    extras, layout_window, layout_words, letters, prefix_cells, word_cells,
+};
 
 fn s(v: &[&str]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
@@ -87,4 +89,35 @@ fn word_wider_than_line_gets_its_own_line() {
         .collect();
     assert_eq!(lines, [vec![0], vec![1], vec![2]]);
     assert_eq!(l.caret, (1, 0));
+}
+
+#[test]
+fn zen_newline_in_the_input_ends_the_line() {
+    // zen : les cibles sont vides, le saut de ligne est dans la saisie
+    let words = s(&["", "", ""]);
+    let l = layout_words(&words, &s(&["ab\n", "cd ", ""]), 2, 40);
+    let lines: Vec<Vec<usize>> = l
+        .lines
+        .iter()
+        .map(|line| line.iter().map(|b| b.index).collect())
+        .collect();
+    assert_eq!(lines, [vec![0], vec![1, 2]]);
+    assert_eq!(l.caret, (1, 3));
+}
+
+#[test]
+fn window_layout_starts_at_a_word_and_stops_after_the_caret() {
+    let words: Vec<String> = (0..1000).map(|_| "ab ".to_string()).collect();
+    let inputs = vec![String::new(); 1000];
+    // largeur 5 : deux mots par ligne
+    let l = layout_window(&words, &inputs, 500, 5, 498, 2);
+    assert_eq!(l.lines[0][0].index, 498);
+    assert_eq!(l.caret, (1, 0));
+    assert_eq!(
+        l.lines.len(),
+        4,
+        "ligne du caret + 2 lignes complètes après"
+    );
+    let full = layout_words(&words, &inputs, 500, 5);
+    assert_eq!(full.lines[250], l.lines[1]);
 }

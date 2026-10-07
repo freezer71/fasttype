@@ -67,13 +67,30 @@ impl Layout {
 
 /// Place tous les mots sur des lignes de `width` cases.
 pub fn layout_words(words: &[String], inputs: &[String], active: usize, width: u16) -> Layout {
+    layout_window(words, inputs, active, width, 0, usize::MAX)
+}
+
+/// Place les mots à partir du mot `start` (début d'une ligne), et s'arrête
+/// `lines_after` lignes complètes après celle du caret : le coût d'une image
+/// ne dépend pas de la longueur du test. Les numéros de ligne partent de `start`.
+pub fn layout_window(
+    words: &[String],
+    inputs: &[String],
+    active: usize,
+    width: u16,
+    start: usize,
+    lines_after: usize,
+) -> Layout {
     let mut lines: Vec<Vec<WordBox>> = vec![Vec::new()];
     let mut x: u16 = 0;
-    let mut caret = (0, 0);
-    for (index, target) in words.iter().enumerate() {
+    let mut caret = None;
+    for (index, target) in words.iter().enumerate().skip(start) {
         let input = inputs.get(index).map_or("", String::as_str);
         let w = word_cells(target, input);
         if x > 0 && x.saturating_add(w) > width {
+            if caret.is_some_and(|(l, _)| lines.len() - l > lines_after) {
+                break;
+            }
             lines.push(Vec::new());
             x = 0;
         }
@@ -81,10 +98,13 @@ pub fn layout_words(words: &[String], inputs: &[String], active: usize, width: u
         lines[line].push(WordBox { index, x, width: w });
         if index == active {
             let typed = letters(input).chars().count();
-            caret = (line, x + prefix_cells(target, input, typed));
+            caret = Some((line, x + prefix_cells(target, input, typed)));
         }
         x = x.saturating_add(w + 1);
-        if target.ends_with('\n') {
+        if target.ends_with('\n') || input.ends_with('\n') {
+            if caret.is_some_and(|(l, _)| lines.len() - l > lines_after) {
+                break;
+            }
             lines.push(Vec::new());
             x = 0;
         }
@@ -92,5 +112,8 @@ pub fn layout_words(words: &[String], inputs: &[String], active: usize, width: u
     if lines.last().is_some_and(Vec::is_empty) && lines.len() > 1 {
         lines.pop();
     }
-    Layout { lines, caret }
+    Layout {
+        lines,
+        caret: caret.unwrap_or((0, 0)),
+    }
 }
