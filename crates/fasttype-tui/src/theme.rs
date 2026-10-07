@@ -20,6 +20,24 @@ impl ColorMode {
     }
 }
 
+pub type Rgb = (u8, u8, u8);
+
+/// Les 10 couleurs d'un thème en RGB opaque (les couleurs translucides sont
+/// déjà posées sur le fond).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RgbColors {
+    pub bg: Rgb,
+    pub main: Rgb,
+    pub caret: Rgb,
+    pub sub: Rgb,
+    pub sub_alt: Rgb,
+    pub text: Rgb,
+    pub error: Rgb,
+    pub error_extra: Rgb,
+    pub colorful_error: Rgb,
+    pub colorful_error_extra: Rgb,
+}
+
 /// Les 10 couleurs d'un thème, prêtes pour ratatui.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
@@ -34,7 +52,16 @@ pub struct Palette {
     pub colorful_error: Color,
     pub colorful_error_extra: Color,
     /// Couleur du caret en RGB, pour la séquence OSC 12 du curseur.
-    pub caret_rgb: (u8, u8, u8),
+    pub caret_rgb: Rgb,
+    pub rgb: RgbColors,
+    pub mode: ColorMode,
+}
+
+/// `a` vers `b` : `t = 0` donne `a`, `t = 1` donne `b`.
+pub fn mix(a: Rgb, b: Rgb, t: f64) -> Rgb {
+    let t = t.clamp(0.0, 1.0);
+    let m = |x: u8, y: u8| (f64::from(x) + (f64::from(y) - f64::from(x)) * t).round() as u8;
+    (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
 }
 
 impl Palette {
@@ -46,10 +73,12 @@ impl Palette {
             a: 255,
         };
         let bg = theme.bg.over(black);
-        let c = |x: Rgba| to_color(x.over(bg), mode);
-        let caret = theme.caret.over(bg);
-        Palette {
-            bg: to_color(bg, mode),
+        let c = |x: Rgba| {
+            let o = x.over(bg);
+            (o.r, o.g, o.b)
+        };
+        let rgb = RgbColors {
+            bg: (bg.r, bg.g, bg.b),
             main: c(theme.main),
             caret: c(theme.caret),
             sub: c(theme.sub),
@@ -59,16 +88,77 @@ impl Palette {
             error_extra: c(theme.error_extra),
             colorful_error: c(theme.colorful_error),
             colorful_error_extra: c(theme.colorful_error_extra),
-            caret_rgb: (caret.r, caret.g, caret.b),
+        };
+        Self::from_rgb(rgb, mode)
+    }
+
+    pub fn from_rgb(rgb: RgbColors, mode: ColorMode) -> Self {
+        let c = |x: Rgb| to_color(x, mode);
+        Palette {
+            bg: c(rgb.bg),
+            main: c(rgb.main),
+            caret: c(rgb.caret),
+            sub: c(rgb.sub),
+            sub_alt: c(rgb.sub_alt),
+            text: c(rgb.text),
+            error: c(rgb.error),
+            error_extra: c(rgb.error_extra),
+            colorful_error: c(rgb.colorful_error),
+            colorful_error_extra: c(rgb.colorful_error_extra),
+            caret_rgb: rgb.caret,
+            rgb,
+            mode,
         }
+    }
+
+    /// Couleur `x` vue à l'opacité `opacity` sur le fond du thème.
+    pub fn over_bg(&self, x: Rgb, opacity: f64) -> Color {
+        to_color(mix(self.rgb.bg, x, opacity), self.mode)
+    }
+
+    /// Palette à l'opacité `opacity` : chaque couleur est mêlée au fond, comme
+    /// un élément HTML à `opacity < 1` sur le fond de la page.
+    pub fn faded(&self, opacity: f64) -> Palette {
+        if opacity >= 1.0 {
+            return *self;
+        }
+        let r = self.rgb;
+        let f = |x: Rgb| mix(r.bg, x, opacity);
+        let faded = RgbColors {
+            bg: r.bg,
+            main: f(r.main),
+            caret: f(r.caret),
+            sub: f(r.sub),
+            sub_alt: f(r.sub_alt),
+            text: f(r.text),
+            error: f(r.error),
+            error_extra: f(r.error_extra),
+            colorful_error: f(r.colorful_error),
+            colorful_error_extra: f(r.colorful_error_extra),
+        };
+        Palette::from_rgb(faded, self.mode)
     }
 }
 
-fn to_color(c: Rgba, mode: ColorMode) -> Color {
+pub fn to_color(c: Rgb, mode: ColorMode) -> Color {
     match mode {
-        ColorMode::TrueColor => Color::Rgb(c.r, c.g, c.b),
-        ColorMode::Ansi256 => Color::Indexed(nearest_256(c.r, c.g, c.b)),
+        ColorMode::TrueColor => Color::Rgb(c.0, c.1, c.2),
+        ColorMode::Ansi256 => Color::Indexed(nearest_256_cached(c)),
     }
+}
+
+thread_local! {
+    static NEAREST: std::cell::RefCell<std::collections::HashMap<Rgb, u8>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// `nearest_256` avec un cache : les fondus recalculent les mêmes couleurs à chaque image.
+fn nearest_256_cached(c: Rgb) -> u8 {
+    NEAREST.with(|m| {
+        *m.borrow_mut()
+            .entry(c)
+            .or_insert_with(|| nearest_256(c.0, c.1, c.2))
+    })
 }
 
 fn oklab(r: u8, g: u8, b: u8) -> [f64; 3] {

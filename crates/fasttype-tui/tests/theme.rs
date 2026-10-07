@@ -43,3 +43,18 @@ fn translucent_colors_are_blended_on_background() {
     let blended = t.sub.over(t.bg);
     assert_eq!(p.sub, Color::Rgb(blended.r, blended.g, blended.b));
 }
+
+#[test]
+fn faded_palette_blends_toward_background() {
+    let t = theme(DEFAULT_THEME).unwrap();
+    let p = Palette::from_theme(t, ColorMode::TrueColor);
+    assert_eq!(p.faded(1.0), p);
+    let zero = p.faded(0.0);
+    assert_eq!(zero.main, p.bg);
+    assert_eq!(zero.text, p.bg);
+    let half = p.faded(0.5);
+    // main #e2b714 sur bg #323437 à 50 %
+    assert_eq!(half.main, Color::Rgb(0x8a, 0x76, 0x26));
+    let p256 = Palette::from_theme(t, ColorMode::Ansi256);
+    assert_eq!(p256.faded(0.0).main, p256.bg);
+}
