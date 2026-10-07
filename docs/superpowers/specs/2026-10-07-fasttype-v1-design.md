@@ -116,7 +116,7 @@ kogasa(c) = 100 * (1 - tanh(c + c^3/3 + c^5/5))
 consistency = round2(kogasa(stddev_pop(burst_per_second) / mean(burst_per_second)))   // 0 si NaN
 ```
 - `count_chars` suit exactement l'algorithme de Monkeytype : l'espace séparateur fait partie de la cible, et le dernier mot reçoit un crédit partiel en mode time et en bail out.
-- **Graphique** : les points sont sur une grille de 1 s. On ajoute une borne finale fractionnaire si le reste dépasse 0,5 s (tests non chronométrés). Séries : wpm cumulé, burst par seconde et erreurs par seconde, 122 points maximum.
+- **Graphique** : les points sont sur une grille de 1 s. On ajoute une borne finale fractionnaire si le reste dépasse 0,5 s (tests non chronométrés). Séries : wpm cumulé, burst par seconde et erreurs par seconde. Monkeytype ne garde pas le graphique des tests de plus de 122 s (limite de son serveur) ; fasttype garde la série complète en local.
 - **AFK** : aucune insertion pendant les 5 dernières secondes.
 - **Invalidations**, dans cet ordre : test trop court (moins d'1 s ; time < 15 ; words < 10 ; zen < 15 s), AFK, test répété, wpm ou raw hors de [0, 350] (420 pour words 10), précision < 75 %. Un résultat invalide est affiché mais pas enregistré.
 - **Clé de PB** : `(mode, mode2, punctuation, numbers, language, difficulty, lazy_mode)`. Un PB est mis à jour seulement si le wpm est strictement supérieur. Les citations ne comptent pas pour les PB.
