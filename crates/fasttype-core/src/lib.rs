@@ -5,6 +5,7 @@ pub mod chars;
 pub mod clock;
 pub mod event;
 pub mod numbers;
+pub mod punctuation;
 pub mod rng;
 pub mod spec;
 pub mod stats;
