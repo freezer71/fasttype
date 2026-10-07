@@ -1,11 +1,14 @@
 //! Écran de test : lignes de mots visibles, en-tête et raccourcis.
 
 use crate::layout::{Layout, char_width, extras, letters};
+use crate::sized::{ScaledCell, ScaledText};
 use crate::theme::Palette;
 use crate::view::centered_segments;
+use crate::view::config_bar::{bar_groups, bar_width, render_bar};
 use crate::view::live::WordsBox;
 use fasttype_core::session::TestSession;
-use ratatui::buffer::Buffer;
+use fasttype_store::Config;
+use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
@@ -25,20 +28,32 @@ fn letter_colors(p: &Palette, flip: bool, colorful: bool) -> (Color, Color, Colo
     (correct, untyped, incorrect, extra)
 }
 
-/// Place de la zone de mots : centrée, `maxLineWidth` cases au plus (0 =
-/// automatique, 100 cases au plus), 3 lignes (2 en zen).
-pub fn words_box(area: Rect, max_line_width: u16, zen: bool) -> WordsBox {
-    let width = if max_line_width >= 20 {
-        max_line_width.min(area.width.saturating_sub(2))
+/// Place de la zone de mots : centrée, 3 lignes (2 en zen) de lettres à
+/// l'échelle `scale`. Largeur : `maxLineWidth` lettres (0 = automatique :
+/// 100 cases de l'écran au plus). L'échelle baisse si la zone ne tient pas.
+pub fn words_box(area: Rect, max_line_width: u16, zen: bool, scale: u16) -> WordsBox {
+    let lines = if zen { 2 } else { 3 };
+    let mut scale = scale.max(1);
+    // la place des mots, plus l'en-tête, les stats et les raccourcis
+    while scale > 1
+        && (area.width.saturating_sub(8) / scale < 20 || lines * scale + 8 > area.height)
+    {
+        scale -= 1;
+    }
+    let screen = if max_line_width >= 20 {
+        max_line_width
+            .saturating_mul(scale)
+            .min(area.width.saturating_sub(2))
     } else {
         area.width.saturating_sub(8).min(100)
     };
-    let lines = if zen { 2 } else { 3 };
+    let width = screen / scale;
     WordsBox {
-        left: area.x + area.width.saturating_sub(width) / 2,
-        top: area.y + area.height.saturating_sub(lines) / 2,
+        left: area.x + area.width.saturating_sub(width * scale) / 2,
+        top: area.y + area.height.saturating_sub(lines * scale) / 2,
         width,
         lines,
+        scale,
     }
 }
 
@@ -56,21 +71,64 @@ pub struct WordsView<'a> {
 }
 
 impl WordsView<'_> {
-    pub fn render(&self, buf: &mut Buffer) {
-        let shown = usize::from(self.words.lines);
+    /// Dessine les mots. À l'échelle 1, dans le tampon ; au-delà, la zone est
+    /// réservée (`skip`) et les lettres sont renvoyées pour l'écriture OSC 66.
+    pub fn render(&self, buf: &mut Buffer) -> Option<ScaledText> {
+        let w = self.words;
+        let shown = usize::from(w.lines);
+        let mut letters = Vec::new();
         for (row, line) in self.layout.lines.iter().take(shown).enumerate() {
-            let y = self.words.top + row as u16;
             let palette = match self.last_line {
                 Some(ref p) if row + 1 == shown => p,
                 _ => self.palette,
             };
             for b in line {
-                self.draw_word(buf, palette, self.words.left + b.x, y, b.index);
+                self.word_letters(palette, b.x, row as u16, b.index, &mut letters);
             }
         }
+        let area = buf.area;
+        if w.scale <= 1 {
+            for (col, row, ch, style) in letters {
+                let (x, y) = (w.left + col, w.top + row);
+                if x < area.right() && y < area.bottom() {
+                    buf[(x, y)].set_char(ch).set_style(style);
+                }
+            }
+            return None;
+        }
+        let region = w.rect().intersection(area);
+        for y in region.top()..region.bottom() {
+            for x in region.left()..region.right() {
+                buf[(x, y)].set_diff_option(CellDiffOption::Skip);
+            }
+        }
+        let cells = letters
+            .into_iter()
+            .map(|(col, row, ch, style)| ScaledCell {
+                x: w.left + col * w.scale,
+                y: w.top + row * w.scale,
+                ch,
+                style,
+            })
+            .filter(|c| c.x + w.scale <= region.right() && c.y + w.scale <= region.bottom())
+            .collect();
+        Some(ScaledText {
+            scale: w.scale,
+            region,
+            bg: self.palette.bg,
+            cells,
+        })
     }
 
-    fn draw_word(&self, buf: &mut Buffer, p: &Palette, x0: u16, y: u16, index: usize) {
+    /// Lettres d'un mot : (colonne, ligne, caractère, style), en lettres.
+    fn word_letters(
+        &self,
+        p: &Palette,
+        x0: u16,
+        row: u16,
+        index: usize,
+        out: &mut Vec<(u16, u16, char, Style)>,
+    ) {
         let s = self.session;
         let (correct, untyped, incorrect, extra) =
             letter_colors(p, self.flip_test_colors, self.colorful_mode);
@@ -86,12 +144,9 @@ impl WordsView<'_> {
                 st
             }
         };
-        let right = buf.area.right();
         let mut x = x0;
         let mut put = |c: char, style: Style| {
-            if x < right {
-                buf[(x, y)].set_char(c).set_style(style);
-            }
+            out.push((x, row, c, style));
             x += char_width(c);
         };
         if self.zen {
@@ -115,14 +170,14 @@ impl WordsView<'_> {
     }
 }
 
-/// En-tête (logo et résumé de la config) et raccourcis du bas, avec leurs
+/// En-tête (logo et barre de config) et raccourcis du bas, avec leurs
 /// opacités du focus mode.
 pub struct Chrome<'a> {
     pub palette: &'a Palette,
     /// Couleur du logo : `main`, qui passe à `sub` en focus mode.
     pub logo: Color,
-    pub summary: &'a str,
-    /// Opacité du résumé de la config et des raccourcis.
+    pub config: &'a Config,
+    /// Opacité de la barre de config et des raccourcis.
     pub opacity: f64,
     pub tips: &'a str,
 }
@@ -139,15 +194,19 @@ impl Chrome<'_> {
             return;
         }
         let p = self.palette.faded(self.opacity);
-        let summary_x = area
-            .right()
-            .saturating_sub(self.summary.chars().count() as u16 + 2);
-        buf.set_string(
-            summary_x,
-            area.y + 1,
-            self.summary,
-            Style::default().fg(p.sub),
-        );
+        // la barre à côté du logo si elle tient, sinon en dessous, compacte au besoin
+        let full = bar_groups(self.config, false);
+        let bar = if bar_width(&full) <= area.width {
+            full
+        } else {
+            bar_groups(self.config, true)
+        };
+        let y = if bar_width(&bar) + 24 <= area.width {
+            area.y + 1
+        } else {
+            area.y + 3
+        };
+        render_bar(buf, area, y, &bar, &p);
         let key = Style::default().fg(p.sub_alt).bg(p.sub);
         let text = Style::default().fg(p.sub);
         let tips = [

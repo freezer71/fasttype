@@ -60,8 +60,28 @@ pub struct LiveStats {
 pub struct WordsBox {
     pub left: u16,
     pub top: u16,
+    /// Largeur en lettres (cases agrandies quand `scale > 1`).
     pub width: u16,
     pub lines: u16,
+    /// Taille du texte des mots : chaque lettre occupe `scale × scale` cases.
+    pub scale: u16,
+}
+
+impl WordsBox {
+    /// Hauteur de la zone en lignes de l'écran.
+    pub fn rows(&self) -> u16 {
+        self.lines * self.scale
+    }
+
+    /// Zone occupée à l'écran.
+    pub fn rect(&self) -> Rect {
+        Rect {
+            x: self.left,
+            y: self.top,
+            width: self.width * self.scale,
+            height: self.rows(),
+        }
+    }
 }
 
 impl LiveStats {
@@ -95,7 +115,7 @@ impl LiveStats {
             .collect();
         if !rest.is_empty() {
             let line = rest.join("  ");
-            let y = words.top + words.lines + 1;
+            let y = words.top + words.rows() + 1;
             if y + big::HEIGHT < area.bottom() && big::supported(&line) {
                 big::draw(buf, center(&line), y, &line, style);
             } else if y < area.bottom() {

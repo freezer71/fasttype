@@ -27,17 +27,34 @@ pub fn graphics_supported() -> bool {
     GRAPHICS.load(Ordering::SeqCst)
 }
 
-/// Envoie `kitty::PROBE` et lit la réponse directement sur l'entrée, avant
-/// que le thread clavier ne la lise : 300 ms au plus (DA1 arrive bien avant).
+/// Des images Kitty (caret) seront affichées : `restore` les supprimera.
+pub fn mark_kitty_images() {
+    KITTY_IMAGES.store(true, Ordering::SeqCst);
+}
+
+static HOOK: Once = Once::new();
+static TEXT_SIZING: AtomicBool = AtomicBool::new(false);
+
+/// Le terminal a montré au démarrage qu'il agrandit le texte (OSC 66).
+pub fn text_sizing_supported() -> bool {
+    TEXT_SIZING.load(Ordering::SeqCst)
+}
+
+/// Envoie une sonde et lit la réponse directement sur l'entrée, avant que le
+/// thread clavier ne la lise : 300 ms au plus (les terminaux répondent bien avant).
 #[cfg(unix)]
-fn probe_graphics(out: &mut impl Write) -> io::Result<bool> {
+fn probe(
+    out: &mut impl Write,
+    query: &[u8],
+    answer: fn(&[u8]) -> Option<bool>,
+) -> io::Result<bool> {
     use std::time::{Duration, Instant};
-    out.write_all(crate::kitty::PROBE)?;
+    out.write_all(query)?;
     out.flush()?;
     let deadline = Instant::now() + Duration::from_millis(300);
     let mut got = Vec::new();
     loop {
-        if let Some(ok) = crate::kitty::probe_answer(&got) {
+        if let Some(ok) = answer(&got) {
             return Ok(ok);
         }
         let left = deadline.saturating_duration_since(Instant::now());
@@ -64,15 +81,13 @@ fn probe_graphics(out: &mut impl Write) -> io::Result<bool> {
 }
 
 #[cfg(not(unix))]
-fn probe_graphics(_out: &mut impl Write) -> io::Result<bool> {
+fn probe(
+    _out: &mut impl Write,
+    _query: &[u8],
+    _answer: fn(&[u8]) -> Option<bool>,
+) -> io::Result<bool> {
     Ok(false)
 }
-
-/// Des images Kitty (caret) seront affichées : `restore` les supprimera.
-pub fn mark_kitty_images() {
-    KITTY_IMAGES.store(true, Ordering::SeqCst);
-}
-static HOOK: Once = Once::new();
 
 /// Accumule une image entière ; `present` l'envoie au terminal en un seul
 /// `write`. Les clones partagent le même tampon : l'un est donné au backend
@@ -180,7 +195,10 @@ impl TerminalGuard {
         let mut out = io::stdout();
         execute!(out, EnterAlternateScreen)?;
         // avant toute autre lecture de l'entrée (protocole clavier, thread clavier)
-        GRAPHICS.store(probe_graphics(&mut out)?, Ordering::SeqCst);
+        let graphics = probe(&mut out, crate::kitty::PROBE, crate::kitty::probe_answer)?;
+        GRAPHICS.store(graphics, Ordering::SeqCst);
+        let sizing = probe(&mut out, crate::sized::PROBE, crate::sized::probe_answer)?;
+        TEXT_SIZING.store(sizing, Ordering::SeqCst);
         if matches!(supports_keyboard_enhancement(), Ok(true)) {
             execute!(
                 out,

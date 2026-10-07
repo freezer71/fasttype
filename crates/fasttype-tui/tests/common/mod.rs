@@ -108,6 +108,12 @@ pub fn render(app: &mut App, w: u16, h: u16) -> (Buffer, Option<(u16, u16)>) {
     (backend.buffer().clone(), caret)
 }
 
+/// Colonne (en cases) de la première occurrence de `pat` dans la ligne `y`.
+pub fn col(buf: &Buffer, y: u16, pat: &str) -> Option<u16> {
+    let r = row(buf, y);
+    r.find(pat).map(|i| r[..i].chars().count() as u16)
+}
+
 /// Texte d'une ligne du tampon.
 pub fn row(buf: &Buffer, y: u16) -> String {
     (0..buf.area.width)

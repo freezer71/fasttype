@@ -1,6 +1,6 @@
 mod common;
 
-use common::{app, render, row, screen_text, settle, type_text, type_whole_test};
+use common::{app, col, render, row, screen_text, settle, type_text, type_whole_test};
 
 #[test]
 fn test_screen_shows_header_words_and_tips() {
@@ -8,16 +8,19 @@ fn test_screen_shows_header_words_and_tips() {
     let (buf, caret) = render(&mut a, 80, 24);
     let text = screen_text(&buf);
     assert!(row(&buf, 1).contains("fasttype"));
-    assert!(row(&buf, 1).contains("time 30 · english"));
+    // barre de config compacte à 80 colonnes, sous le logo
+    assert!(row(&buf, 3).contains("time"), "{text}");
+    assert!(row(&buf, 3).contains("30"));
+    assert!(text.contains("english"), "badge de langue");
     assert!(text.contains("tab + enter - restart"));
     let first = a.session().word(0).trim_end().to_string();
     let words_row = (0..24)
         .find(|&y| row(&buf, y).contains(&first))
         .expect("premier mot affiché");
-    let x = row(&buf, words_row).find(&first).unwrap();
+    let x = col(&buf, words_row, &first).unwrap();
     assert_eq!(
         caret,
-        Some((x as u16, words_row)),
+        Some((x, words_row)),
         "caret avant la première lettre"
     );
 }
@@ -65,8 +68,8 @@ fn focus_mode_fades_the_chrome() {
     type_text(&mut a, &first, 0.0, 100.0);
     a.tick(40.0);
     let (buf, _) = render(&mut a, 80, 24);
-    let x = row(&buf, 1).find("time 30").expect("encore visible") as u16;
-    let fg = buf[(x, 1)].fg;
+    let x = col(&buf, 3, "words").expect("encore visible");
+    let fg = buf[(x, 3)].fg;
     assert_ne!(fg, a.palette().sub, "en cours de fondu");
     assert_ne!(fg, a.palette().bg);
 }

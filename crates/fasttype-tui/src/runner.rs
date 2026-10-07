@@ -8,8 +8,10 @@ use crate::input::spawn_signal_watcher;
 use crate::input::{Input, spawn_reader};
 use crate::kitty::{CaretRenderer, CellPx, DELETE_ALL, KittyCaret};
 use crate::perf::Perf;
+use crate::sized::ScaledText;
 use crate::terminal::{
     FrameWriter, TerminalGuard, graphics_supported, mark_kitty_images, queue_caret_look,
+    text_sizing_supported,
 };
 use crate::theme::ColorMode;
 use crossterm::queue;
@@ -77,6 +79,8 @@ struct Output {
     last_look: Option<CaretLook>,
     kitty: Option<KittyCaret>,
     size: Size,
+    /// Mots agrandis déjà à l'écran : rien à réécrire s'ils n'ont pas changé.
+    scaled: Option<ScaledText>,
 }
 
 impl Output {
@@ -86,6 +90,8 @@ impl Output {
         let size = self.term.size()?;
         if size != self.size {
             self.size = size;
+            // ratatui efface l'écran : les mots agrandis sont à réécrire
+            self.scaled = None;
             // la taille des cases a pu changer (zoom) : images à refaire
             if let Some(k) = &mut self.kitty {
                 match cell_px() {
@@ -108,6 +114,13 @@ impl Output {
         }
         self.term
             .draw(|f| app.draw(f, perf.enabled.then_some(perf)))?;
+        let scaled = app.scaled_text();
+        if scaled != self.scaled.as_ref() {
+            if let Some(t) = scaled {
+                t.write(self.term.backend_mut())?;
+            }
+            self.scaled = scaled.cloned();
+        }
         if let Some(k) = &mut self.kitty {
             k.draw(
                 self.term.backend_mut(),
@@ -163,9 +176,11 @@ pub fn run(opts: Options) -> io::Result<Perf> {
         frame,
         last_look: None,
         kitty,
+        scaled: None,
     };
     let mut app = App::new(store, color_mode, clock.now_ms(), seed());
     app.set_caret_renderer(renderer);
+    app.set_text_sizing(text_sizing_supported());
     app.set_fps(opts.fps);
     let mut perf = Perf::new(opts.perf);
     app.tick(clock.now_ms());

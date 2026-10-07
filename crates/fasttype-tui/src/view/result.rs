@@ -23,6 +23,8 @@ pub struct ResultView<'a> {
     pub decimals: bool,
     /// `startGraphsAtZero`.
     pub start_graphs_at_zero: bool,
+    /// Source de la citation (mode quote).
+    pub quote_source: Option<&'a str>,
 }
 
 /// Facteur de conversion depuis le wpm (`typing-speed-units.ts`).
@@ -203,6 +205,16 @@ impl ResultView<'_> {
             y + 1,
             &[("test type ".to_string(), label), (test_type(r), detail)],
         );
+        let mut next = y + 2;
+        if let Some(source) = self.quote_source {
+            centered_segments(
+                buf,
+                area,
+                next,
+                &[("source ".to_string(), label), (source.to_string(), detail)],
+            );
+            next += 1;
+        }
         let mut other = Vec::new();
         if let Some(reason) = r.invalid {
             other.push(invalid_label(reason));
@@ -214,7 +226,7 @@ impl ResultView<'_> {
             centered_segments(
                 buf,
                 area,
-                y + 2,
+                next,
                 &[
                     ("other ".to_string(), label),
                     (other.join(", "), Style::default().fg(p.error)),

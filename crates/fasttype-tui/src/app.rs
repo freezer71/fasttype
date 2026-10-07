@@ -7,12 +7,15 @@
 //! `now` du dernier `tick` ou de la dernière touche.
 
 use crate::anim::{FrameClock, OUT2, TAILWIND_EASE, Tween};
-use crate::caret::{Caret, CaretFrame, CaretStyle, CaretTarget, coverage, smooth_caret_ms};
+use crate::caret::{
+    Caret, CaretFrame, CaretStyle, CaretTarget, coverage, coverage_box, smooth_caret_ms,
+};
 use crate::input::{Input, Key, Phase};
 use crate::kitty::CaretRenderer;
 use crate::layout::{Layout, char_width, layout_window, letters};
 use crate::perf::Perf;
 use crate::session_factory::SessionFactory;
+use crate::sized::{ScaledCell, ScaledText, scale_for};
 use crate::theme::{ColorMode, Palette, Rgb, mix};
 use crate::view::live::{LiveItem, LiveStats, Style3, WordsBox, render_bar, seconds_to_string};
 use crate::view::notify::{Level, Notifications};
@@ -26,10 +29,11 @@ use fasttype_data::themes::{Rgba, Theme};
 use fasttype_data::{DEFAULT_THEME, theme};
 use fasttype_store::{Config, RecordOutcome, Store};
 use ratatui::Frame;
-use ratatui::buffer::Buffer;
+use ratatui::buffer::{Buffer, CellDiffOption};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use std::collections::HashSet;
+use unicode_width::UnicodeWidthStr;
 
 /// Durée des fondus (test, résultat, restart, stats en direct, focus mode).
 pub const FADE_MS: f64 = 125.0;
@@ -117,6 +121,13 @@ pub struct App {
     /// wpm et raw du dernier tick (une fois par seconde, comme le site).
     live_wpm: (f64, f64),
     transition: Option<Transition>,
+    /// Le terminal gère OSC 66 : les mots s'affichent à `fontSize` fois la taille.
+    text_sizing: bool,
+    /// Mots agrandis du dernier dessin, à écrire par la boucle.
+    scaled: Option<ScaledText>,
+    /// Zone des mots agrandis de l'image précédente : à redessiner en entier
+    /// quand elle disparaît (ratatui n'y avait rien écrit).
+    last_scaled_region: Option<Rect>,
     /// Avertissements déjà montrés : un repli n'est signalé qu'une fois.
     warned: HashSet<String>,
 }
@@ -245,6 +256,9 @@ impl App {
             bar: Tween::fixed(0.0),
             live_wpm: (0.0, 0.0),
             transition: None,
+            text_sizing: false,
+            scaled: None,
+            last_scaled_region: None,
             warned: HashSet::new(),
             store,
         };
@@ -267,6 +281,16 @@ impl App {
     /// Choisit le rendu du caret (détecté par la boucle au démarrage).
     pub fn set_caret_renderer(&mut self, renderer: CaretRenderer) {
         self.renderer = renderer;
+    }
+
+    /// Le terminal sait agrandir le texte (OSC 66, détecté au démarrage).
+    pub fn set_text_sizing(&mut self, supported: bool) {
+        self.text_sizing = supported;
+    }
+
+    /// Mots agrandis du dernier `draw`, à écrire après le dessin ratatui.
+    pub fn scaled_text(&self) -> Option<&ScaledText> {
+        self.scaled.as_ref()
     }
 
     /// Cadence des images d'animation (60 par défaut).
@@ -725,6 +749,7 @@ impl App {
     pub fn draw(&mut self, frame: &mut Frame, perf: Option<&Perf>) {
         let area = frame.area();
         self.caret_frame = None;
+        self.scaled = None;
         if area.is_empty() {
             return;
         }
@@ -754,6 +779,12 @@ impl App {
                     unit: c.str("typingSpeedUnit"),
                     decimals: c.bool("alwaysShowDecimalPlaces"),
                     start_graphs_at_zero: c.bool("startGraphsAtZero"),
+                    quote_source: self
+                        .session
+                        .spec()
+                        .quote
+                        .as_ref()
+                        .map(|q| q.source.as_str()),
                 }
                 .render(buf, area);
             }
@@ -777,7 +808,7 @@ impl App {
         Chrome {
             palette: &self.palette,
             logo,
-            summary: &self.summary(),
+            config: &self.store.config,
             opacity: chrome_opacity,
             tips: "restart",
         }
@@ -791,6 +822,23 @@ impl App {
                 Style::default().fg(self.palette.sub),
             );
         }
+        // l'ancienne zone agrandie qui n'est plus réservée : tout y réécrire,
+        // ce qui efface aussi les lettres agrandies restées à l'écran
+        let region = self.scaled.as_ref().map(|s| s.region);
+        if let Some(old) = self.last_scaled_region
+            && region != Some(old)
+        {
+            let keep = region.unwrap_or_default();
+            let old = old.intersection(area);
+            for y in old.top()..old.bottom() {
+                for x in old.left()..old.right() {
+                    if !keep.contains(ratatui::layout::Position { x, y }) {
+                        buf[(x, y)].set_diff_option(CellDiffOption::AlwaysUpdate);
+                    }
+                }
+            }
+        }
+        self.last_scaled_region = region;
         if let Some(pos) = cursor {
             frame.set_cursor_position(pos);
         }
@@ -812,13 +860,18 @@ impl App {
             .config
             .int("maxLineWidth")
             .clamp(0, i64::from(u16::MAX)) as u16;
-        let words = words_box(area, max_line_width, zen);
+        let scale = if self.text_sizing {
+            scale_for(self.store.config.float("fontSize"))
+        } else {
+            1
+        };
+        let words = words_box(area, max_line_width, zen, scale);
         let layout = self.visible_lines(words, now);
         let c = &self.store.config;
         let last_line = self
             .line_fade
             .map(|start| content.faded(OUT2.apply((now - start) / FADE_MS)));
-        WordsView {
+        self.scaled = WordsView {
             session: &self.session,
             palette: content,
             layout: &layout,
@@ -830,6 +883,14 @@ impl App {
         }
         .render(buf);
 
+        // badge de langue au-dessus des mots, effacé en focus mode comme la barre
+        let badge = self.chrome.value(now) * opacity;
+        if badge > 0.0 && words.top >= area.y + 3 {
+            let name = self.session.spec().language.replace('_', " ");
+            let x = area.x + area.width.saturating_sub(name.width() as u16) / 2;
+            let fg = self.palette.over_bg(self.palette.rgb.sub, badge);
+            buf.set_string(x, words.top - 2, &name, Style::default().fg(fg));
+        }
         // stats en direct, visibles pendant la frappe
         let live = self.live.value(now) * opacity;
         if live > 0.0 {
@@ -910,11 +971,12 @@ impl App {
         } else {
             1
         };
+        let k = f64::from(words.scale);
         let target = CaretTarget {
-            x: f64::from(words.left + col),
-            y: f64::from(words.top) + line as f64,
-            width: f64::from(width),
-            height: 1.0,
+            x: f64::from(words.left) + f64::from(col) * k,
+            y: f64::from(words.top) + line as f64 * k,
+            width: f64::from(width) * k,
+            height: k,
         };
         if self.caret_reset {
             self.caret.jump(target);
@@ -933,6 +995,38 @@ impl App {
         let mut f = self.caret.frame(style, now, smooth_blink);
         f.opacity *= opacity;
         match style {
+            CaretStyle::Block if self.scaled.is_some() => {
+                // lettres agrandies : on teinte le fond de chaque lettre couverte
+                let caret = self.palette.rgb.caret;
+                let st = self.scaled.as_mut()?;
+                let s = st.scale;
+                let col0 = ((f.x - f64::from(words.left)) / f64::from(s))
+                    .floor()
+                    .max(0.0) as u16;
+                let row0 = ((f.y - f64::from(words.top)) / f64::from(s))
+                    .floor()
+                    .max(0.0) as u16;
+                for row in row0..=row0 + 1 {
+                    for col in col0..=col0 + (f.width / f64::from(s)).ceil() as u16 {
+                        let (x, y) = (words.left + col * s, words.top + row * s);
+                        let k = coverage_box(&f, x, y, s) * f.opacity;
+                        if k <= 0.0 || x + s > st.region.right() || y + s > st.region.bottom() {
+                            continue;
+                        }
+                        let bg = content.over_bg(caret, k);
+                        match st.cells.iter_mut().find(|c| c.x == x && c.y == y) {
+                            Some(c) => c.style = c.style.bg(bg),
+                            None => st.cells.push(ScaledCell {
+                                x,
+                                y,
+                                ch: ' ',
+                                style: Style::default().bg(bg),
+                            }),
+                        }
+                    }
+                }
+                None
+            }
             CaretStyle::Block => {
                 // pavé derrière la lettre : fond teinté au prorata de la case couverte
                 let (x0, y0) = (f.x.floor().max(0.0) as u16, f.y.floor().max(0.0) as u16);
