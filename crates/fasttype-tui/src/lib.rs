@@ -2,6 +2,7 @@
 
 pub mod anim;
 pub mod app;
+pub mod caret;
 pub mod input;
 pub mod layout;
 pub mod perf;
