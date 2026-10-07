@@ -109,6 +109,12 @@ impl LanguageCache {
         slot.get_or_init(|| load_language(name).map(Arc::new))
             .clone()
     }
+
+    /// La langue est déjà chargée (sans attendre ni la charger).
+    pub fn is_ready(&self, name: &str) -> bool {
+        let loaded = self.loaded.lock().unwrap_or_else(|p| p.into_inner());
+        loaded.get(name).is_some_and(|slot| slot.get().is_some())
+    }
 }
 
 static LANGUAGE_GROUPS_JSON: &str = include_str!("../../../assets/language_groups.json");

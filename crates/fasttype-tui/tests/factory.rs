@@ -60,3 +60,39 @@ fn quote_groups_follow_quote_length() {
         "favoris non gérés : toutes"
     );
 }
+
+#[test]
+fn custom_mode_uses_the_chosen_text() {
+    let mut f = SessionFactory::new();
+    f.custom_text = Some("alpha beta gamma".into());
+    let built = f.build(&config("mode = \"custom\"\n"), 7);
+    let words: Vec<&str> = built.session.words().iter().map(|w| w.trim_end()).collect();
+    assert_eq!(&words[..3], ["alpha", "beta", "gamma"]);
+    // un texte vide garde celui du site
+    f.custom_text = Some("   ".into());
+    let built = f.build(&config("mode = \"custom\"\n"), 7);
+    assert_ne!(built.session.word(0).trim_end(), "");
+}
+
+#[test]
+fn a_selected_quote_is_used_with_quote_length_minus_two() {
+    let mut f = SessionFactory::new();
+    let file = f.quotes("english").expect("citations anglaises");
+    let id = file.quotes[123].id;
+    f.selected_quote = Some(id);
+    for seed in [1, 2, 3] {
+        let built = f.build(&config("mode = \"quote\"\nquote_length = [-2]\n"), seed);
+        assert_eq!(built.session.spec().quote.as_ref().unwrap().id, id);
+    }
+    // sans -2, la citation est tirée au hasard dans les groupes
+    let built = f.build(&config("mode = \"quote\"\nquote_length = [0]\n"), 5);
+    assert_eq!(built.session.spec().quote.as_ref().unwrap().group, 0);
+}
+
+#[test]
+fn languages_can_be_preloaded_in_the_background() {
+    let f = SessionFactory::new();
+    assert!(!f.language_ready("german"));
+    f.preload("german").join().unwrap();
+    assert!(f.language_ready("german"));
+}

@@ -23,8 +23,13 @@ pub struct Built {
 
 #[derive(Default)]
 pub struct SessionFactory {
-    languages: LanguageCache,
+    /// Partagé avec le thread qui précharge une langue choisie dans la palette.
+    languages: Arc<LanguageCache>,
     quotes: HashMap<String, Option<Arc<QuoteFile>>>,
+    /// Texte du mode custom (« Change custom text ») ; sinon celui du site.
+    pub custom_text: Option<String>,
+    /// Citation choisie par « Search for quotes » (`quoteLength = [-2]`).
+    pub selected_quote: Option<u32>,
 }
 
 /// Citation tirée parmi les groupes de `quoteLength` (0 à 3) ; tous si aucun.
@@ -54,7 +59,23 @@ impl SessionFactory {
         Self::default()
     }
 
-    fn quotes(&mut self, language: &str) -> Option<Arc<QuoteFile>> {
+    /// La langue est déjà décompressée : un test peut être créé sans attendre.
+    pub fn language_ready(&self, name: &str) -> bool {
+        self.languages.is_ready(name)
+    }
+
+    /// Décompresse une langue dans un thread (les plus grosses prennent des
+    /// dizaines de millisecondes) ; le prochain `build` la trouvera en cache.
+    pub fn preload(&self, name: &str) -> std::thread::JoinHandle<()> {
+        let cache = Arc::clone(&self.languages);
+        let name = name.to_string();
+        std::thread::spawn(move || {
+            let _ = cache.get(&name);
+        })
+    }
+
+    /// Citations d'une langue (décompressées une fois, puis gardées).
+    pub fn quotes(&mut self, language: &str) -> Option<Arc<QuoteFile>> {
         self.quotes
             .entry(language.to_string())
             .or_insert_with(|| quotes_for(language).ok().flatten().map(Arc::new))
@@ -97,18 +118,27 @@ impl SessionFactory {
             }
             "zen" => (TestSpec::zen(&language), WordGenerator::empty()),
             "custom" => {
-                let limit =
-                    CustomLimit::Word(DEFAULT_CUSTOM_TEXT.split_whitespace().count() as u32);
-                let source =
-                    CustomWords::new(DEFAULT_CUSTOM_TEXT, CustomMode::Repeat, limit, false);
+                let text = self
+                    .custom_text
+                    .as_deref()
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or(DEFAULT_CUSTOM_TEXT);
+                let limit = CustomLimit::Word(text.split_whitespace().count() as u32);
+                let source = CustomWords::new(text, CustomMode::Repeat, limit, false);
                 (
                     TestSpec::custom(limit, &language, punctuation, numbers),
                     WordGenerator::new(Box::new(source), &language, punctuation, numbers),
                 )
             }
             "quote" => {
+                let lengths = config.int_list("quoteLength");
+                let selected = self.selected_quote.filter(|_| lengths.contains(&-2));
                 let picked = self.quotes(&language).and_then(|file| {
-                    let q = pick_quote(&file, &config.int_list("quoteLength"), &mut rng)?;
+                    let chosen = selected.and_then(|id| file.quotes.iter().find(|q| q.id == id));
+                    let q = match chosen {
+                        Some(q) => q,
+                        None => pick_quote(&file, &lengths, &mut rng)?,
+                    };
                     let meta = QuoteMeta {
                         id: q.id,
                         group: file.group_of(q).unwrap_or(0),

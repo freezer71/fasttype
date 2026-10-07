@@ -99,3 +99,13 @@ fn language_groups_cover_known_languages() {
         }
     }
 }
+
+#[test]
+fn cache_tells_whether_a_language_is_ready_without_loading_it() {
+    let cache = LanguageCache::new();
+    assert!(!cache.is_ready("french"));
+    assert!(!cache.is_ready("french"), "la question ne charge rien");
+    cache.get("french").unwrap();
+    assert!(cache.is_ready("french"));
+    assert!(!cache.is_ready("english"));
+}
