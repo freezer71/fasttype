@@ -19,6 +19,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static KEYBOARD_PUSHED: AtomicBool = AtomicBool::new(false);
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+static KITTY_IMAGES: AtomicBool = AtomicBool::new(false);
+
+/// Des images Kitty (caret) seront affichées : `restore` les supprimera.
+pub fn mark_kitty_images() {
+    KITTY_IMAGES.store(true, Ordering::SeqCst);
+}
 static HOOK: Once = Once::new();
 
 /// Accumule une image entière ; `present` l'envoie au terminal en un seul
@@ -90,6 +96,9 @@ pub fn restore() {
         return;
     }
     let mut out = io::stdout();
+    if KITTY_IMAGES.swap(false, Ordering::SeqCst) {
+        let _ = out.write_all(crate::kitty::DELETE_ALL);
+    }
     if KEYBOARD_PUSHED.swap(false, Ordering::SeqCst) {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
     }

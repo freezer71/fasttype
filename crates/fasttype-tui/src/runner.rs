@@ -1,12 +1,14 @@
-//! Boucle principale : attend une touche ou la prochaine échéance, applique
-//! toutes les touches en attente, puis dessine aussitôt une seule image.
+//! Boucle principale : attend une touche ou la prochaine échéance (image
+//! d'animation, tick du timer), applique toutes les touches en attente, puis
+//! dessine aussitôt une seule image.
 
 use crate::app::{App, CaretLook};
 #[cfg(unix)]
 use crate::input::spawn_signal_watcher;
 use crate::input::{Input, spawn_reader};
+use crate::kitty::{CaretRenderer, CellPx, DELETE_ALL, KittyCaret};
 use crate::perf::Perf;
-use crate::terminal::{FrameWriter, TerminalGuard, queue_caret_look};
+use crate::terminal::{FrameWriter, TerminalGuard, mark_kitty_images, queue_caret_look};
 use crate::theme::ColorMode;
 use crossterm::queue;
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
@@ -15,13 +17,40 @@ use fasttype_store::Store;
 use fasttype_store::paths::Paths;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use std::io;
+use ratatui::layout::Size;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
 pub struct Options {
     pub perf: bool,
+    /// Images d'animation par seconde (60, 120 ou 144).
+    pub fps: u32,
+}
+
+/// `--perf` et `--fps N` (60, 120 ou 144).
+pub fn parse_options(args: &[String]) -> Result<Options, String> {
+    let mut opts = Options {
+        perf: false,
+        fps: 60,
+    };
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--perf" => opts.perf = true,
+            "--fps" => {
+                opts.fps = match it.next().map(String::as_str) {
+                    Some("60") => 60,
+                    Some("120") => 120,
+                    Some("144") => 144,
+                    _ => return Err("--fps takes 60, 120 or 144".to_string()),
+                }
+            }
+            other => return Err(format!("unknown option: {other}")),
+        }
+    }
+    Ok(opts)
 }
 
 type Term = Terminal<CrosstermBackend<FrameWriter>>;
@@ -33,26 +62,56 @@ fn seed() -> u64 {
         .unwrap_or(1)
 }
 
-/// Dessine une image et l'envoie en une écriture, encadrée par la sortie
-/// synchronisée (mode 2026) : le terminal ne montre jamais d'image partielle.
-fn present(
-    term: &mut Term,
-    frame: &FrameWriter,
-    app: &mut App,
-    perf: &Perf,
-    last_look: &mut Option<CaretLook>,
-) -> io::Result<()> {
-    queue!(term.backend_mut(), BeginSynchronizedUpdate)?;
-    let look = app.caret_look();
-    if look != *last_look {
-        if let Some(l) = look {
-            queue_caret_look(term.backend_mut(), l)?;
+/// Taille d'une case en pixels, si le terminal la donne.
+fn cell_px() -> Option<CellPx> {
+    let w = crossterm::terminal::window_size().ok()?;
+    CellPx::from_window(w.columns, w.rows, w.width, w.height)
+}
+
+/// Ce qui survit d'une image à l'autre.
+struct Output {
+    term: Term,
+    frame: FrameWriter,
+    last_look: Option<CaretLook>,
+    kitty: Option<KittyCaret>,
+    size: Size,
+}
+
+impl Output {
+    /// Dessine une image et l'envoie en une écriture, encadrée par la sortie
+    /// synchronisée (mode 2026) : le terminal ne montre jamais d'image partielle.
+    fn present(&mut self, app: &mut App, perf: &Perf) -> io::Result<()> {
+        let size = self.term.size()?;
+        if size != self.size {
+            self.size = size;
+            // la taille des cases a pu changer (zoom) : images à refaire
+            if let Some(k) = &mut self.kitty
+                && let Some(cell) = cell_px()
+            {
+                self.term.backend_mut().write_all(DELETE_ALL)?;
+                *k = KittyCaret::new(cell);
+            }
         }
-        *last_look = look;
+        queue!(self.term.backend_mut(), BeginSynchronizedUpdate)?;
+        let look = app.caret_look();
+        if look != self.last_look {
+            if let Some(l) = look {
+                queue_caret_look(self.term.backend_mut(), l)?;
+            }
+            self.last_look = look;
+        }
+        self.term
+            .draw(|f| app.draw(f, perf.enabled.then_some(perf)))?;
+        if let Some(k) = &mut self.kitty {
+            k.draw(
+                self.term.backend_mut(),
+                app.caret_frame(),
+                app.palette().caret_rgb,
+            )?;
+        }
+        queue!(self.term.backend_mut(), EndSynchronizedUpdate)?;
+        self.frame.present(&mut io::stdout())
     }
-    term.draw(|f| app.draw(f, perf.enabled.then_some(perf)))?;
-    queue!(term.backend_mut(), EndSynchronizedUpdate)?;
-    frame.present(&mut io::stdout())
 }
 
 /// Applique une touche puis toutes celles déjà reçues (rafale), dans l'ordre,
@@ -77,16 +136,33 @@ pub fn run(opts: Options) -> io::Result<Perf> {
     let clock = Arc::new(SystemClock::new());
     let color_mode = ColorMode::detect(|k| std::env::var(k).ok());
     let _guard = TerminalGuard::enter()?;
+    let renderer = CaretRenderer::detect(|k| std::env::var(k).ok(), cell_px());
     let (tx, rx) = mpsc::sync_channel::<Input>(4096);
     #[cfg(unix)]
     spawn_signal_watcher(tx.clone())?;
     spawn_reader(Arc::clone(&clock), tx);
     let frame = FrameWriter::new();
-    let mut term = Terminal::new(CrosstermBackend::new(frame.clone()))?;
+    let term = Terminal::new(CrosstermBackend::new(frame.clone()))?;
+    let kitty = match renderer {
+        CaretRenderer::Kitty(cell) => {
+            mark_kitty_images();
+            Some(KittyCaret::new(cell))
+        }
+        CaretRenderer::Cell => None,
+    };
+    let mut out = Output {
+        size: term.size()?,
+        term,
+        frame,
+        last_look: None,
+        kitty,
+    };
     let mut app = App::new(store, color_mode, clock.now_ms(), seed());
+    app.set_caret_renderer(renderer);
+    app.set_fps(opts.fps);
     let mut perf = Perf::new(opts.perf);
-    let mut last_look = None;
-    present(&mut term, &frame, &mut app, &perf, &mut last_look)?;
+    app.tick(clock.now_ms());
+    out.present(&mut app, &perf)?;
 
     while !app.quit {
         let now = clock.now_ms();
@@ -100,9 +176,12 @@ pub fn run(opts: Options) -> io::Result<Perf> {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        if app.quit {
+            break;
+        }
         app.tick(clock.now_ms());
         let start = clock.now_ms();
-        present(&mut term, &frame, &mut app, &perf, &mut last_look)?;
+        out.present(&mut app, &perf)?;
         let done = clock.now_ms();
         perf.frame.record(done - start);
         if let Some(t) = oldest_key {

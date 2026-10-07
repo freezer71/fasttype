@@ -2,12 +2,14 @@
 
 use fasttype_store::Store;
 use fasttype_store::paths::Paths;
-use fasttype_tui::runner::{Options, run};
+use fasttype_tui::runner::{parse_options, run};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: fasttype [--perf | --rebuild-pbs | --version | --help]
+const USAGE: &str =
+    "usage: fasttype [--perf] [--fps 60|120|144] | --rebuild-pbs | --version | --help
 
   --perf          show input latency and frame time
+  --fps N         animation frames per second (default 60)
   --rebuild-pbs   recompute personal bests from the result history";
 
 fn rebuild_pbs() -> ExitCode {
@@ -34,9 +36,7 @@ fn rebuild_pbs() -> ExitCode {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let perf = match args.first().map(String::as_str) {
-        None => false,
-        Some("--perf") => true,
+    match args.first().map(String::as_str) {
         Some("--rebuild-pbs") => return rebuild_pbs(),
         Some("--version" | "-V") => {
             println!("fasttype {}", env!("CARGO_PKG_VERSION"));
@@ -46,12 +46,17 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        Some(other) => {
-            eprintln!("unknown option: {other}\n{USAGE}");
+        _ => {}
+    }
+    let opts = match parse_options(&args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("{e}\n{USAGE}");
             return ExitCode::FAILURE;
         }
     };
-    match run(Options { perf }) {
+    let perf = opts.perf;
+    match run(opts) {
         Ok(stats) => {
             if perf {
                 println!("{}", stats.summary());

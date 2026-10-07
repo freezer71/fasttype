@@ -31,6 +31,17 @@ fn next_char(app: &App) -> char {
         .unwrap_or(' ')
 }
 
+fn key(a: &mut App, t: f64) {
+    let key = Key::Char(next_char(a));
+    a.handle(Input::Key {
+        key,
+        phase: Phase::Press,
+        code: 1,
+        at: t,
+    });
+    a.tick(t);
+}
+
 fn bench(c: &mut Criterion) {
     let mut term = Terminal::new(TestBackend::new(200, 60)).unwrap();
     let mut a = app();
@@ -42,17 +53,30 @@ fn bench(c: &mut Criterion) {
     let mut t = 0.0;
     c.bench_function("key_and_frame_200x60", |b| {
         b.iter(|| {
-            let key = Key::Char(next_char(&a));
-            a.handle(Input::Key {
-                key,
-                phase: Phase::Press,
-                code: 1,
-                at: t,
-            });
-            a.tick(t);
+            key(&mut a, t);
             t += 15.0;
             term.draw(|f| a.draw(f, None)).unwrap();
             black_box(a.session().active_index())
+        })
+    });
+    // spec §9 : le coût d'une frappe ne grandit pas avec la longueur du test
+    let mut long = app();
+    let mut t = 0.0;
+    for _ in 0..10_000 {
+        key(&mut long, t);
+        t += 15.0;
+        term.draw(|f| long.draw(f, None)).unwrap();
+    }
+    assert!(
+        long.session().active_index() > 1500,
+        "les 10 000 frappes ont été tapées"
+    );
+    c.bench_function("key_and_frame_after_10k_keys", |b| {
+        b.iter(|| {
+            key(&mut long, t);
+            t += 15.0;
+            term.draw(|f| long.draw(f, None)).unwrap();
+            black_box(long.session().active_index())
         })
     });
 }
