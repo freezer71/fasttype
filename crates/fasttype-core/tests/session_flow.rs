@@ -158,3 +158,17 @@ fn zen_cannot_be_repeated() {
     );
     assert!(s.into_repeat().is_none());
 }
+
+#[test]
+fn finished_session_produces_monkeytype_numbers() {
+    let mut s = words_session(&["the", "cat"]);
+    for (i, ch) in "the cat".chars().enumerate() {
+        s.insert(ch, 1000.0 + i as f64 * 100.0);
+    }
+    let r = s.result(0).unwrap();
+    assert_eq!(r.wpm, 140.0);
+    assert_eq!(r.acc, 100.0);
+    assert_eq!(r.char_stats, [7, 0, 0, 0]);
+    assert_eq!(r.chart.wpm.len(), 1); // borne finale fractionnaire à 0,6 s
+    assert_eq!(r.invalid, Some(fasttype_core::result::Invalid::TooShort));
+}

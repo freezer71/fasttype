@@ -8,6 +8,7 @@ pub mod generator;
 pub mod numbers;
 pub mod punctuation;
 pub mod quote;
+pub mod result;
 pub mod rng;
 pub mod session;
 pub mod sources;

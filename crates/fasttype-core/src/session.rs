@@ -6,6 +6,7 @@ use crate::chars::count_words;
 use crate::event::{EventContext, EventKind, EventLog};
 use crate::generator::WordGenerator;
 use crate::numbers::{calculate_wpm, js_round};
+use crate::result::{TestResult, build_result};
 use crate::rng::RandomSource;
 use crate::spec::{Mode, TestSpec};
 
@@ -523,5 +524,11 @@ impl TestSession {
 
     pub fn is_repeated(&self) -> bool {
         self.repeated
+    }
+
+    /// Résultat du test terminé ; `timestamp` en ms Unix (fourni par l'appelant).
+    pub fn result(&self, timestamp: u64) -> Option<TestResult> {
+        (self.state == SessionState::Finished)
+            .then(|| build_result(&self.log, &self.spec, self.repeated, timestamp))
     }
 }
