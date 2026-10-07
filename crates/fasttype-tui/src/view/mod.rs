@@ -1,5 +1,8 @@
 //! Rendu des écrans dans un `Buffer` ratatui (sans E/S : testable hors terminal).
 
+pub mod big;
+pub mod chart;
+pub mod live;
 pub mod notify;
 pub mod result;
 pub mod test;
