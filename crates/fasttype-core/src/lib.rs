@@ -6,6 +6,8 @@ pub mod clock;
 pub mod event;
 pub mod numbers;
 pub mod punctuation;
+pub mod quote;
 pub mod rng;
+pub mod sources;
 pub mod spec;
 pub mod stats;
