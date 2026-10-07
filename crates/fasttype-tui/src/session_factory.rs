@@ -70,8 +70,10 @@ impl SessionFactory {
         let requested = config.str("language");
         let (language, words) = match self.languages.get(requested) {
             Ok(l) => (requested.to_string(), Arc::clone(&l.words)),
-            Err(e) => {
-                warning = Some(format!("{e} — using {DEFAULT_LANGUAGE}"));
+            Err(_) => {
+                warning = Some(format!(
+                    "language {requested} not found - using {DEFAULT_LANGUAGE}"
+                ));
                 match self.languages.get(DEFAULT_LANGUAGE) {
                     Ok(l) => (DEFAULT_LANGUAGE.to_string(), Arc::clone(&l.words)),
                     Err(_) => (DEFAULT_LANGUAGE.to_string(), Arc::new(Vec::new())),

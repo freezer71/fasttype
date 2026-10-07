@@ -99,3 +99,12 @@ fn resize_keeps_caret_after_the_typed_letters() {
         assert_eq!(before, typed, "{w}×{h}");
     }
 }
+
+#[test]
+fn zero_sized_terminal_does_not_panic() {
+    let a = app("v-zero", "");
+    for (w, h) in [(100, 0), (0, 30), (0, 0), (39, 24), (80, 9)] {
+        let (_, caret) = render(&a, w, h);
+        assert_eq!(caret, None, "{w}×{h}");
+    }
+}

@@ -261,12 +261,15 @@ impl App {
             self.quit = true;
             return;
         }
-        let has_newlines = self.session.words().iter().any(|w| w.contains('\n'));
+        // En zen, Entrée insère un saut de ligne et Shift+Entrée termine le test :
+        // ni l'une ni l'autre ne relance.
+        let zen = self.session.spec().mode == Mode::Zen && matches!(self.screen, Screen::Test);
+        let has_newlines = zen || self.session.words().iter().any(|w| w.contains('\n'));
         let quick = self.store.config.str("quickRestart");
         let is_quick = match (quick, key) {
             ("tab", Key::Tab | Key::BackTab) | ("esc", Key::Esc) => true,
             ("enter", Key::Enter) => !has_newlines,
-            ("enter", Key::ShiftEnter) => true,
+            ("enter", Key::ShiftEnter) => !zen,
             _ => false,
         };
         if is_quick {
@@ -388,6 +391,9 @@ impl App {
     pub fn draw(&self, frame: &mut Frame, perf: Option<&Perf>) {
         let area = frame.area();
         let buf = frame.buffer_mut();
+        if area.is_empty() {
+            return;
+        }
         fill_background(buf, area, &self.palette);
         if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
             too_small(buf, area, &self.palette);

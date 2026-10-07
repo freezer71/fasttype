@@ -196,3 +196,45 @@ fn invalid_result_is_announced_and_not_saved() {
             .any(|n| n.text.starts_with("Test invalid"))
     );
 }
+
+#[test]
+fn zen_with_quick_restart_on_enter_keeps_newlines_and_ends_with_shift_enter() {
+    let mut a = app("zen-enter", "mode = \"zen\"\nquick_restart = \"enter\"\n");
+    type_text(&mut a, "hello", 0.0, 100.0);
+    a.handle(press(Key::Enter, 600.0));
+    assert!(
+        a.session().inputs().concat().contains("hello"),
+        "Entrée ne relance pas un test zen"
+    );
+    type_text(&mut a, "abc", 700.0, 100.0);
+    a.handle(press(Key::ShiftEnter, 1100.0));
+    assert!(matches!(a.screen(), Screen::Result(_)));
+}
+
+#[test]
+fn unknown_language_warning_is_in_english() {
+    let a = app("lang-en", "language = \"klingon_9000k\"\n");
+    let texts: Vec<&str> = a
+        .notifications
+        .items()
+        .iter()
+        .map(|n| n.text.as_str())
+        .collect();
+    assert!(
+        texts.contains(&"language klingon_9000k not found - using english"),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn zen_result_screen_restarts_on_enter_with_quick_restart_enter() {
+    let mut a = app(
+        "zen-enter-result",
+        "mode = \"zen\"\nquick_restart = \"enter\"\n",
+    );
+    type_text(&mut a, "hi ", 0.0, 100.0);
+    a.handle(press(Key::ShiftEnter, 500.0));
+    assert!(matches!(a.screen(), Screen::Result(_)));
+    a.handle(press(Key::Enter, 900.0));
+    assert!(matches!(a.screen(), Screen::Test));
+}
