@@ -2,6 +2,7 @@
 //! (`input/handlers/*`, `input/helpers/fail-or-finish.ts`, `test/test-logic.ts`).
 //! Chaque action est horodatée par l'appelant (`now`, en ms d'une horloge monotone).
 
+use crate::chars::count_words;
 use crate::event::{EventContext, EventKind, EventLog};
 use crate::generator::WordGenerator;
 use crate::numbers::{calculate_wpm, js_round};
@@ -54,7 +55,6 @@ pub struct TestSession {
     active: usize,
     state: SessionState,
     start_at: f64,
-    #[expect(dead_code, reason = "lu par tick, complété à la tâche 11")]
     next_tick: u32,
     log: EventLog,
     pending_keydown: Option<u32>,
@@ -351,9 +351,114 @@ impl TestSession {
         true
     }
 
-    /// Avance le timer jusqu'à `now`. Complété à la tâche 11.
-    pub fn tick(&mut self, _now: f64) -> bool {
-        false
+    /// Avance le timer jusqu'à `now` : un `TimerStep` par seconde écoulée, et
+    /// fin du test à la limite de temps (`timerStep` + `checkIfTimeIsUp`).
+    /// Le test se termine à la seconde pile, comme sur une grille idéale.
+    pub fn tick(&mut self, now: f64) -> bool {
+        let mut ticked = false;
+        while self.state == SessionState::Running {
+            let due = f64::from(self.next_tick) * 1000.0;
+            if self.ms(now) < due {
+                break;
+            }
+            ticked = true;
+            self.log.push(
+                due,
+                EventKind::TimerStep {
+                    second: self.next_tick,
+                },
+            );
+            if let Some(limit) = self.spec.time_limit
+                && limit > 0
+                && self.next_tick >= limit
+            {
+                self.finish_at(due, EndReason::TimeUp);
+                break;
+            }
+            self.next_tick += 1;
+        }
+        ticked
+    }
+
+    /// Instant (horloge de l'appelant) du prochain tick, pour programmer le réveil.
+    pub fn next_tick_at(&self) -> Option<f64> {
+        (self.state == SessionState::Running)
+            .then(|| self.start_at + f64::from(self.next_tick) * 1000.0)
+    }
+
+    /// Stats live du dernier tick (`timerStep`) : wpm et raw arrondis avec
+    /// crédit partiel du mot actif, précision tronquée (100 sans frappe).
+    pub fn live_stats(&self) -> LiveStats {
+        let seconds = self.next_tick.saturating_sub(1);
+        let acc = match self.correct_inputs + self.incorrect_inputs {
+            0 => 100.0,
+            total => (f64::from(self.correct_inputs) / f64::from(total) * 100.0).floor(),
+        };
+        if self.words.is_empty() || seconds == 0 {
+            return LiveStats {
+                seconds,
+                wpm: 0.0,
+                raw: 0.0,
+                acc,
+            };
+        }
+        let zen = self.is_zen();
+        let last = self.active.min(self.words.len() - 1);
+        let c = count_words(
+            (0..=last).map(|i| {
+                let input = self.inputs[i].as_str();
+                (
+                    input,
+                    if zen { input } else { self.words[i].as_str() },
+                    i == last,
+                )
+            }),
+            true,
+        );
+        let s = f64::from(seconds);
+        LiveStats {
+            seconds,
+            wpm: js_round(calculate_wpm(f64::from(c.correct_word), s)),
+            raw: js_round(calculate_wpm(
+                f64::from(c.all_correct + c.incorrect + c.extra),
+                s,
+            )),
+            acc,
+        }
+    }
+
+    /// Shift + Entrée en zen.
+    pub fn finish_zen(&mut self, now: f64) {
+        if self.is_zen() && self.state == SessionState::Running {
+            let ms = self.ms(now);
+            self.finish_at(ms, EndReason::ZenFinished);
+        }
+    }
+
+    /// « Bail out » de la palette : fin immédiate, sans PB.
+    pub fn bail_out(&mut self, now: f64) {
+        if self.state != SessionState::Running {
+            return;
+        }
+        self.tick(now);
+        if self.state == SessionState::Running {
+            let ms = self.ms(now);
+            self.finish_at(ms, EndReason::BailedOut);
+        }
+    }
+
+    /// `repeatTest` : mêmes mots, la génération reprend ensuite là où elle
+    /// s'était arrêtée. Indisponible en zen.
+    pub fn into_repeat(self) -> Option<TestSession> {
+        if self.is_zen() {
+            return None;
+        }
+        let mut s = Self::empty(self.spec, self.generator, self.rng);
+        for w in self.words {
+            s.push_word(w);
+        }
+        s.repeated = true;
+        Some(s)
     }
 
     fn finish_at(&mut self, ms: f64, reason: EndReason) {
