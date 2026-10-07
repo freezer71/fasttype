@@ -119,6 +119,8 @@ impl TerminalGuard {
         });
         enable_raw_mode()?;
         ACTIVE.store(true, Ordering::SeqCst);
+        // le garde existe dès le mode raw : si la suite échoue, son `drop` restaure
+        let guard = TerminalGuard;
         let mut out = io::stdout();
         execute!(out, EnterAlternateScreen)?;
         if matches!(supports_keyboard_enhancement(), Ok(true)) {
@@ -131,7 +133,7 @@ impl TerminalGuard {
             )?;
             KEYBOARD_PUSHED.store(true, Ordering::SeqCst);
         }
-        Ok(TerminalGuard)
+        Ok(guard)
     }
 }
 

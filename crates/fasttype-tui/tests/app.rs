@@ -238,3 +238,32 @@ fn zen_result_screen_restarts_on_enter_with_quick_restart_enter() {
     a.handle(press(Key::Enter, 900.0));
     assert!(matches!(a.screen(), Screen::Test));
 }
+
+#[test]
+fn keys_after_ctrl_c_in_a_burst_are_dropped() {
+    let mut a = app("burst-quit", "mode = \"words\"\nwords = 1\n");
+    let word = a.session().word(0).trim_end().to_string();
+    let mut chars = word.chars();
+    let first = chars.next().unwrap();
+    // la rafale : première lettre, Ctrl+C, puis la fin du mot et l'espace
+    let rest: Vec<_> = std::iter::once(press(Key::Quit, 20.0))
+        .chain(chars.map(|c| press(Key::Char(c), 30.0)))
+        .chain(std::iter::once(press(Key::Char(' '), 40.0)))
+        .collect();
+    let oldest =
+        fasttype_tui::runner::apply_burst(&mut a, press(Key::Char(first), 10.0), rest.into_iter());
+    assert_eq!(oldest, Some(10.0));
+    assert!(a.quit);
+    assert!(
+        matches!(a.screen(), Screen::Test),
+        "test abandonné, pas enregistré"
+    );
+    assert!(a.store.history().unwrap().results.is_empty());
+}
+
+#[test]
+fn a_signal_quits() {
+    let mut a = app("signal", "");
+    a.handle(fasttype_tui::input::Input::Interrupt);
+    assert!(a.quit);
+}

@@ -242,6 +242,10 @@ impl App {
     }
 
     pub fn handle(&mut self, input: Input) {
+        if input == Input::Interrupt {
+            self.quit = true;
+            return;
+        }
         let Input::Key {
             key,
             phase,

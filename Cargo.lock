@@ -604,6 +604,7 @@ dependencies = [
  "fasttype-data",
  "fasttype-store",
  "ratatui",
+ "signal-hook",
  "unicode-width",
 ]
 

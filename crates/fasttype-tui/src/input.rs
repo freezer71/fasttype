@@ -39,6 +39,8 @@ pub enum Input {
         at: f64,
     },
     Resize,
+    /// SIGTERM, SIGHUP, SIGINT ou SIGQUIT reçu : quitter proprement.
+    Interrupt,
 }
 
 impl Input {
@@ -46,7 +48,7 @@ impl Input {
     pub fn at(&self) -> Option<f64> {
         match self {
             Input::Key { at, .. } => Some(*at),
-            Input::Resize => None,
+            Input::Resize | Input::Interrupt => None,
         }
     }
 }
@@ -120,4 +122,21 @@ pub fn spawn_reader(clock: Arc<SystemClock>, tx: SyncSender<Input>) -> JoinHandl
             }
         })
         .expect("création du thread de lecture du clavier")
+}
+
+/// Transforme SIGTERM, SIGHUP, SIGINT et SIGQUIT en `Input::Interrupt` : la
+/// boucle s'arrête et le terminal est restauré au lieu de rester en mode raw.
+#[cfg(unix)]
+pub fn spawn_signal_watcher(tx: SyncSender<Input>) -> std::io::Result<JoinHandle<()>> {
+    use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+    let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGHUP, SIGINT, SIGQUIT])?;
+    std::thread::Builder::new()
+        .name("fasttype-signals".into())
+        .spawn(move || {
+            for _ in signals.forever() {
+                if tx.send(Input::Interrupt).is_err() {
+                    break;
+                }
+            }
+        })
 }

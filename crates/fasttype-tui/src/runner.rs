@@ -2,6 +2,8 @@
 //! toutes les touches en attente, puis dessine aussitôt une seule image.
 
 use crate::app::{App, CaretLook};
+#[cfg(unix)]
+use crate::input::spawn_signal_watcher;
 use crate::input::{Input, spawn_reader};
 use crate::perf::Perf;
 use crate::terminal::{FrameWriter, TerminalGuard, queue_caret_look};
@@ -53,6 +55,21 @@ fn present(
     frame.present(&mut io::stdout())
 }
 
+/// Applique une touche puis toutes celles déjà reçues (rafale), dans l'ordre,
+/// en s'arrêtant à Ctrl+C. Renvoie l'horodatage de la plus ancienne touche.
+pub fn apply_burst(app: &mut App, first: Input, rest: impl Iterator<Item = Input>) -> Option<f64> {
+    let mut oldest = first.at();
+    app.handle(first);
+    for input in rest {
+        if app.quit {
+            break;
+        }
+        oldest = oldest.or(input.at());
+        app.handle(input);
+    }
+    oldest
+}
+
 /// Lance l'interface ; renvoie les mesures de fluidité de la session.
 pub fn run(opts: Options) -> io::Result<Perf> {
     let paths = Paths::from_system().ok_or_else(|| io::Error::other("HOME is not set"))?;
@@ -61,6 +78,8 @@ pub fn run(opts: Options) -> io::Result<Perf> {
     let color_mode = ColorMode::detect(|k| std::env::var(k).ok());
     let _guard = TerminalGuard::enter()?;
     let (tx, rx) = mpsc::sync_channel::<Input>(4096);
+    #[cfg(unix)]
+    spawn_signal_watcher(tx.clone())?;
     spawn_reader(Arc::clone(&clock), tx);
     let frame = FrameWriter::new();
     let mut term = Terminal::new(CrosstermBackend::new(frame.clone()))?;
@@ -77,15 +96,7 @@ pub fn run(opts: Options) -> io::Result<Perf> {
         };
         let mut oldest_key = None;
         match first {
-            Ok(input) => {
-                oldest_key = input.at();
-                app.handle(input);
-                // rafale : toutes les touches déjà reçues avant de dessiner
-                for more in rx.try_iter() {
-                    oldest_key = oldest_key.or(more.at());
-                    app.handle(more);
-                }
-            }
+            Ok(input) => oldest_key = apply_burst(&mut app, input, rx.try_iter()),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
