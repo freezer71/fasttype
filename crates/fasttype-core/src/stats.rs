@@ -209,6 +209,18 @@ pub fn error_count_history(log: &EventLog) -> Vec<u32> {
 
 /// `getWpmHistory` : wpm cumulé à chaque borne, avec crédit partiel du mot actif.
 pub fn wpm_history(log: &EventLog) -> Vec<f64> {
+    history(log, |c| c.correct_word)
+}
+
+/// `getRawHistory` : raw cumulé à chaque borne (lettres justes, fausses et en
+/// trop), avec crédit partiel du mot actif.
+pub fn raw_history(log: &EventLog) -> Vec<f64> {
+    history(log, |c| c.all_correct + c.extra + c.incorrect)
+}
+
+/// Série cumulée commune à `wpm_history` et `raw_history` : `count` choisit les
+/// caractères comptés dans chaque mot.
+fn history(log: &EventLog, count: fn(&CharCounts) -> u32) -> Vec<f64> {
     let boundaries = timer_boundaries(log);
     let mut inputs: BTreeMap<u32, String> = BTreeMap::new();
     // Comme Monkeytype (`cachedIfLast` / `cachedIfNotLast`), le compte de chaque
@@ -236,11 +248,11 @@ pub fn wpm_history(log: &EventLog) -> Vec<f64> {
         for &w in &dirty {
             let input = inputs[&w].as_str();
             let target = log.target(w).unwrap_or(input);
-            let fresh = count_chars_for(input, target, false, log.context.korean).correct_word;
+            let fresh = count(&count_chars_for(input, target, false, log.context.korean));
             not_last_sum = not_last_sum - not_last.insert(w, fresh).unwrap_or(0) + fresh;
             as_last.insert(
                 w,
-                count_chars_for(input, target, true, log.context.korean).correct_word,
+                count(&count_chars_for(input, target, true, log.context.korean)),
             );
         }
         dirty.clear();

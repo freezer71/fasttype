@@ -76,3 +76,20 @@ fn steady_typing_is_fully_consistent() {
     assert!(burst.iter().all(|&b| b == 60.0));
     assert_eq!(consistency(&burst), 100.0);
 }
+
+#[test]
+fn raw_history_counts_every_typed_char_cumulatively() {
+    let log = LogBuilder::new(Mode::Time, true, &["ab ", "cd ", "ef "])
+        .at(100.0)
+        .typ(0, "xb ")
+        .tick(1)
+        .at(1100.0)
+        .typ(1, "cd")
+        .tick(2)
+        .end(2000.0);
+    // 1 s : "xb " → 3 car. tapés → 36 ; 2 s : 3 + "cd" (crédit partiel) = 5 → 30
+    assert_eq!(stats::raw_history(&log), vec![36.0, 30.0]);
+    // le wpm ne compte que les mots justes
+    assert_eq!(stats::wpm_history(&log), vec![0.0, 12.0]);
+    assert_eq!(stats::raw_history(&two_second_test()), vec![36.0, 30.0]);
+}

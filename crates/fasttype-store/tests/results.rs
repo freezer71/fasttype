@@ -106,3 +106,12 @@ fn non_utf8_line_is_skipped_not_fatal() {
     );
     assert_eq!(loaded.skipped_lines, 1);
 }
+
+#[test]
+fn results_saved_before_the_raw_series_still_load() {
+    let line = serde_json::to_string(&result("30", 50.0, 1)).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    v["chart"].as_object_mut().unwrap().remove("raw");
+    let old: fasttype_core::result::TestResult = serde_json::from_value(v).unwrap();
+    assert!(old.chart.raw.is_empty());
+}

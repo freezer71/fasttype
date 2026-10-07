@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 pub struct ChartData {
     /// wpm cumulé à chaque seconde.
     pub wpm: Vec<f64>,
+    /// raw cumulé à chaque seconde (absent des résultats enregistrés avant la v0.2).
+    #[serde(default)]
+    pub raw: Vec<f64>,
     /// « raw » de chaque seconde.
     pub burst: Vec<f64>,
     /// Erreurs de chaque seconde.
@@ -140,6 +143,7 @@ pub fn build_result(log: &EventLog, spec: &TestSpec, repeated: bool, timestamp: 
         quote_length: spec.quote.as_ref().map(|q| q.group),
         chart: ChartData {
             wpm: stats::wpm_history(log),
+            raw: stats::raw_history(log),
             burst,
             err: stats::error_count_history(log),
         },

@@ -37,6 +37,7 @@ pub fn result(mode2: &str, wpm: f64, timestamp: u64) -> TestResult {
         quote_length: None,
         chart: ChartData {
             wpm: vec![wpm; 3],
+            raw: vec![wpm; 3],
             burst: vec![wpm; 3],
             err: vec![0; 3],
         },

@@ -410,14 +410,26 @@ impl TestSession {
             .then(|| self.start_at + f64::from(self.next_tick) * 1000.0)
     }
 
-    /// Stats live du dernier tick (`timerStep`) : wpm et raw arrondis avec
-    /// crédit partiel du mot actif, précision tronquée (100 sans frappe).
-    pub fn live_stats(&self) -> LiveStats {
-        let seconds = self.next_tick.saturating_sub(1);
-        let acc = match self.correct_inputs + self.incorrect_inputs {
+    /// Secondes entières écoulées au dernier tick (sans calcul : pour le timer).
+    pub fn elapsed_seconds(&self) -> u32 {
+        self.next_tick.saturating_sub(1)
+    }
+
+    /// Précision en direct, tronquée (100 sans frappe) : mise à jour à chaque
+    /// entrée sur le site, sans attendre le tick.
+    pub fn live_accuracy(&self) -> f64 {
+        match self.correct_inputs + self.incorrect_inputs {
             0 => 100.0,
             total => (f64::from(self.correct_inputs) / f64::from(total) * 100.0).floor(),
-        };
+        }
+    }
+
+    /// Stats live du dernier tick (`timerStep`) : wpm et raw arrondis avec
+    /// crédit partiel du mot actif, précision tronquée (100 sans frappe).
+    /// Coûte un parcours des mots : à appeler une fois par tick, pas par image.
+    pub fn live_stats(&self) -> LiveStats {
+        let seconds = self.elapsed_seconds();
+        let acc = self.live_accuracy();
         if self.words.is_empty() || seconds == 0 {
             return LiveStats {
                 seconds,
@@ -545,6 +557,11 @@ impl TestSession {
 
     pub fn end_reason(&self) -> Option<EndReason> {
         self.end_reason
+    }
+
+    /// Le texte contient des sauts de ligne (Entrée les tape au lieu de relancer).
+    pub fn has_newlines(&self) -> bool {
+        self.has_newlines
     }
 
     pub fn is_repeated(&self) -> bool {
