@@ -3,5 +3,7 @@
 
 pub mod chars;
 pub mod clock;
+pub mod event;
 pub mod numbers;
 pub mod rng;
+pub mod spec;
