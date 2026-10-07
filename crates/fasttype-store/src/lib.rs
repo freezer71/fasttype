@@ -4,6 +4,7 @@
 pub mod config;
 pub mod fs;
 pub mod paths;
+pub mod pbs;
 pub mod results;
 pub mod schema;
 
