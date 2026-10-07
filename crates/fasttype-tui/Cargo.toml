@@ -15,3 +15,11 @@ unicode-width.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+
+[[bin]]
+name = "fasttype"
+path = "src/main.rs"
+
+[[bench]]
+name = "frame"
+harness = false
