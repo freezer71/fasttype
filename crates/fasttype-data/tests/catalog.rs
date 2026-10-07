@@ -86,3 +86,16 @@ fn cache_is_shared_across_threads() {
         Err(DataError::UnknownLanguage(_))
     ));
 }
+
+#[test]
+fn language_groups_cover_known_languages() {
+    let groups = fasttype_data::language_groups().unwrap();
+    assert_eq!(groups[0].name, "english");
+    assert!(groups[0].languages.contains(&"english_450k".to_string()));
+    let names = language_names().unwrap();
+    for g in groups {
+        for l in &g.languages {
+            assert!(names.contains(&l.as_str()), "{l} ({})", g.name);
+        }
+    }
+}

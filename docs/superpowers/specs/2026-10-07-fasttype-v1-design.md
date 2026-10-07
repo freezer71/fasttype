@@ -59,7 +59,7 @@ fasttype/
 └── docs/
 ```
 
-Dépendances entre crates : `tui → core, data, store` et `store → core`. `core` ne dépend de rien d'autre dans le projet. `data` ne dépend que de `serde` et `zstd`.
+Dépendances entre crates : `tui → core, data, store`, `store → core` et `data → core` (pour `QuoteFile` et `remove_language_size`). `core` ne dépend de rien d'autre dans le projet. `data` dépend en plus de `serde`, `serde_json` et `zstd` ; son catalogue embarqué est derrière la feature `embedded`, que `xtask` n'active pas.
 
 ## 4. `fasttype-core` : moteur de frappe et stats
 
@@ -195,7 +195,7 @@ thread input  ──(canal borné)──▶  boucle principale
   - `frontend/static/languages/*.json` ;
   - `frontend/static/quotes/*.json` ;
   - les thèmes, extraits de `frontend/src/ts/constants/themes.ts` par un analyseur strict qui échoue sur une forme inattendue ;
-  - le manifeste des langues.
+  - les groupes de langues (`LanguageGroups` de `frontend/src/ts/constants/languages.ts`), écrits dans `assets/language_groups.json`.
 - Il valide le JSON et produit des fichiers zstd (niveau 19, mode long) dans `assets/`, avec un `assets/manifest.toml` qui contient les SHA-256 et le commit d'origine.
 - `assets/` est versionné, environ 40 Mo. Le build n'a donc pas besoin d'Internet.
 - `fasttype-data` embarque tous les fichiers avec `include_bytes!`. Au démarrage, seul l'index des noms est lu. **Une langue n'est décompressée que lorsqu'on la choisit**, puis gardée en mémoire. Les grosses langues sont décompressées dans un thread d'arrière-plan pour ne pas bloquer l'interface, avec l'indication « loading… » sur le badge.

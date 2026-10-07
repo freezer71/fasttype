@@ -2,6 +2,7 @@
 //! premier accès ; chaque langue est décompressée à la demande.
 
 use crate::DataError;
+use crate::groups::LanguageGroup;
 use crate::language::{Language, parse_language, parse_quotes};
 use crate::pack::Pack;
 use crate::themes::Theme;
@@ -108,4 +109,14 @@ impl LanguageCache {
         slot.get_or_init(|| load_language(name).map(Arc::new))
             .clone()
     }
+}
+
+static LANGUAGE_GROUPS_JSON: &str = include_str!("../../../assets/language_groups.json");
+
+/// Groupes de langues (`english` → `english`, `english_1k`…), dans l'ordre de Monkeytype.
+pub fn language_groups() -> Result<&'static [LanguageGroup], DataError> {
+    static CELL: OnceLock<Result<Vec<LanguageGroup>, String>> = OnceLock::new();
+    CELL.get_or_init(|| serde_json::from_str(LANGUAGE_GROUPS_JSON).map_err(|e| e.to_string()))
+        .as_deref()
+        .map_err(|e| DataError::Corrupt(format!("language_groups.json : {e}")))
 }

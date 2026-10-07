@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+# `embedded` : catalogue des données de `assets/`. Désactivé pour `xtask`, qui
+# produit justement ces fichiers et ne doit pas en dépendre.
+[features]
+default = ["embedded"]
+embedded = []
+
 [dependencies]
 fasttype-core.workspace = true
 serde.workspace = true

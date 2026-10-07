@@ -17,5 +17,9 @@ path = "themes.json"
 sha256 = "3ba0c0fef7925c05df32ec09f62b634c111efa11f3f3c188cde0ccdf53787dd4"
 
 [[files]]
+path = "language_groups.json"
+sha256 = "fd83b0f2b45d1c038c32217c2d1e2dedbb81554c10c7dca3864e2a07d2a6098f"
+
+[[files]]
 path = "LICENSE (amont)"
 sha256 = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"

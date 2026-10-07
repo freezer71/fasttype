@@ -88,3 +88,36 @@ fn frame_size_is_checked() {
 fn compression_is_deterministic() {
     assert_eq!(sample(), sample());
 }
+
+/// Réécrit le `raw_len` de chaque entrée dans l'index JSON d'un pack.
+fn with_raw_len(bytes: &[u8], raw_len: u64) -> Vec<u8> {
+    let index_len = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
+    let mut index: serde_json::Value = serde_json::from_slice(&bytes[9..9 + index_len]).unwrap();
+    for e in index.as_array_mut().unwrap() {
+        e["raw_len"] = raw_len.into();
+    }
+    let index = serde_json::to_vec(&index).unwrap();
+    let mut out = bytes[..5].to_vec();
+    out.extend_from_slice(&(index.len() as u32).to_le_bytes());
+    out.extend_from_slice(&index);
+    out.extend_from_slice(&bytes[9 + index_len..]);
+    out
+}
+
+#[test]
+fn absurd_raw_len_in_index_is_an_error_not_a_panic() {
+    let bytes = with_raw_len(&sample(), u64::MAX);
+    match Pack::parse(&bytes) {
+        Err(_) => {}
+        Ok(pack) => assert!(pack.decompress("beta").is_err()),
+    }
+}
+
+#[test]
+fn frame_larger_than_announced_is_rejected_without_reading_it_all() {
+    let frame = compress(&vec![b'a'; 1_000_000]).unwrap();
+    assert!(matches!(
+        decompress_frame(&frame, 10),
+        Err(PackError::SizeMismatch { expected: 10, .. })
+    ));
+}

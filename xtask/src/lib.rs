@@ -1,5 +1,6 @@
 //! Construction de `assets/` à partir du dépôt Monkeytype, à un commit figé.
 
+use fasttype_data::groups::parse_language_groups_ts;
 use fasttype_data::language::{parse_language, parse_quotes};
 use fasttype_data::pack::PackWriter;
 use fasttype_data::themes::parse_themes_ts;
@@ -13,12 +14,22 @@ pub const UPSTREAM: &str = "https://github.com/monkeytypegame/monkeytype";
 const LANGUAGES_DIR: &str = "frontend/static/languages";
 const QUOTES_DIR: &str = "frontend/static/quotes";
 const THEMES_TS: &str = "frontend/src/ts/constants/themes.ts";
+const LANGUAGE_GROUPS_TS: &str = "frontend/src/ts/constants/languages.ts";
+/// Seuls fichiers que `build_assets` accepte de remplacer dans `out/`.
+const OUTPUT_FILES: [&str; 5] = [
+    "languages.pack",
+    "quotes.pack",
+    "themes.json",
+    "language_groups.json",
+    "manifest.toml",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Summary {
     pub languages: usize,
     pub quotes: usize,
     pub themes: usize,
+    pub groups: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,7 +79,7 @@ fn json_files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
 fn build_pack(
     dir: &Path,
     validate: impl Fn(&str, &[u8]) -> Result<(), String>,
-) -> Result<(Vec<u8>, usize), String> {
+) -> Result<(Vec<u8>, Vec<String>), String> {
     let mut writer = PackWriter::new();
     let files = json_files(dir)?;
     for (name, path) in &files {
@@ -76,18 +87,53 @@ fn build_pack(
         validate(name, &bytes).map_err(|e| format!("{} : {e}", path.display()))?;
         writer.add(name, &bytes).map_err(|e| e.to_string())?;
     }
-    Ok((writer.finish(), files.len()))
+    Ok((
+        writer.finish(),
+        files.into_iter().map(|(name, _)| name).collect(),
+    ))
 }
 
-/// Construit `out/` depuis une copie de Monkeytype. Tout est écrit dans
-/// `out.tmp/` puis renommé : en cas d'erreur, `out/` n'est pas touché.
+/// Vérifie que `out` désigne un dossier nommé qu'on peut remplacer : il
+/// n'existe pas encore, ou il ne contient que des fichiers produits ici.
+/// Renvoie son nom et son dossier parent.
+fn check_out(out: &Path) -> Result<(String, PathBuf), String> {
+    let name = out
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| *n != "." && *n != "..")
+        .ok_or_else(|| format!("{} : un dossier nommé est attendu", out.display()))?
+        .to_string();
+    let parent = out
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf();
+    if out.exists() {
+        let entries = fs::read_dir(out).map_err(|e| format!("{} : {e}", out.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let file = entry.file_name().to_string_lossy().to_string();
+            if !OUTPUT_FILES.contains(&file.as_str()) {
+                return Err(format!(
+                    "{} contient « {file} », qui n'est pas un fichier d'assets : rien n'est remplacé",
+                    out.display()
+                ));
+            }
+        }
+    }
+    Ok((name, parent))
+}
+
+/// Construit `out/` depuis une copie de Monkeytype. Tout est écrit dans un
+/// dossier temporaire voisin puis échangé : en cas d'erreur, `out/` n'est pas touché.
 pub fn build_assets(source: &Path, out: &Path, rev: &str) -> Result<Summary, String> {
-    let (languages, n_languages) = build_pack(&source.join(LANGUAGES_DIR), |name, bytes| {
+    let (out_name, parent) = check_out(out)?;
+    let (languages, language_names) = build_pack(&source.join(LANGUAGES_DIR), |name, bytes| {
         parse_language(name, bytes)
             .map(|_| ())
             .map_err(|e| e.to_string())
     })?;
-    let (quotes, n_quotes) = build_pack(&source.join(QUOTES_DIR), |name, bytes| {
+    let (quotes, quote_names) = build_pack(&source.join(QUOTES_DIR), |name, bytes| {
         parse_quotes(name, bytes)
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -99,10 +145,29 @@ pub fn build_assets(source: &Path, out: &Path, rev: &str) -> Result<Summary, Str
     let mut themes_json = serde_json::to_vec_pretty(&themes).map_err(|e| e.to_string())?;
     themes_json.push(b'\n');
 
-    let outputs: [(&str, &[u8]); 3] = [
+    let groups_path = source.join(LANGUAGE_GROUPS_TS);
+    let groups_src =
+        fs::read_to_string(&groups_path).map_err(|e| format!("{} : {e}", groups_path.display()))?;
+    let groups = parse_language_groups_ts(&groups_src).map_err(|e| e.to_string())?;
+    for g in &groups {
+        if let Some(unknown) = g.languages.iter().find(|l| !language_names.contains(l)) {
+            return Err(format!(
+                "{} : le groupe {} cite « {unknown} », langue inconnue",
+                groups_path.display(),
+                g.name
+            ));
+        }
+    }
+    let mut groups_json = serde_json::to_vec_pretty(&groups).map_err(|e| e.to_string())?;
+    groups_json.push(b'\n');
+
+    let n_languages = language_names.len();
+    let n_quotes = quote_names.len();
+    let outputs: [(&str, &[u8]); 4] = [
         ("languages.pack", &languages),
         ("quotes.pack", &quotes),
         ("themes.json", &themes_json),
+        ("language_groups.json", &groups_json),
     ];
     let manifest = Manifest {
         source: UPSTREAM.to_string(),
@@ -124,7 +189,8 @@ pub fn build_assets(source: &Path, out: &Path, rev: &str) -> Result<Summary, Str
     };
     let manifest_toml = toml::to_string(&manifest).map_err(|e| e.to_string())?;
 
-    let tmp = out.with_extension("tmp");
+    let tmp = parent.join(format!(".{out_name}.tmp"));
+    let old = parent.join(format!(".{out_name}.old"));
     let _ = fs::remove_dir_all(&tmp);
     let write_all = || -> std::io::Result<()> {
         fs::create_dir_all(&tmp)?;
@@ -137,14 +203,21 @@ pub fn build_assets(source: &Path, out: &Path, rev: &str) -> Result<Summary, Str
         let _ = fs::remove_dir_all(&tmp);
         return Err(format!("écriture de {} : {e}", tmp.display()));
     }
+    // échange : l'ancien dossier n'est supprimé qu'une fois le nouveau en place
+    let _ = fs::remove_dir_all(&old);
     if out.exists() {
-        fs::remove_dir_all(out).map_err(|e| format!("{} : {e}", out.display()))?;
+        fs::rename(out, &old).map_err(|e| format!("{} : {e}", out.display()))?;
     }
-    fs::rename(&tmp, out).map_err(|e| format!("{} : {e}", out.display()))?;
+    if let Err(e) = fs::rename(&tmp, out) {
+        let _ = fs::rename(&old, out);
+        return Err(format!("{} : {e}", out.display()));
+    }
+    let _ = fs::remove_dir_all(&old);
     Ok(Summary {
         languages: n_languages,
         quotes: n_quotes,
         themes: themes.len(),
+        groups: groups.len(),
     })
 }
 
@@ -173,9 +246,22 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 /// Récupère uniquement les fichiers utiles de Monkeytype, au commit `rev`
-/// (clone partiel et sparse checkout). Ne refait rien si `dest` y est déjà.
+/// (clone partiel et sparse checkout). Ne refait rien si `dest` est déjà à ce
+/// commit, sans modification locale, et contient tous les fichiers utiles.
 pub fn fetch_source(rev: &str, dest: &Path) -> Result<(), String> {
-    if dest.join(".git").exists() && git(dest, &["rev-parse", "HEAD"]).is_ok_and(|h| h == rev) {
+    let reusable = dest.join(".git").exists()
+        && git(dest, &["rev-parse", "HEAD"]).is_ok_and(|h| h == rev)
+        && git(dest, &["status", "--porcelain"]).is_ok_and(|s| s.is_empty())
+        && [
+            LANGUAGES_DIR,
+            QUOTES_DIR,
+            THEMES_TS,
+            LANGUAGE_GROUPS_TS,
+            "LICENSE",
+        ]
+        .iter()
+        .all(|p| dest.join(p).exists());
+    if reusable {
         return Ok(());
     }
     let _ = fs::remove_dir_all(dest);
@@ -195,6 +281,7 @@ pub fn fetch_source(rev: &str, dest: &Path) -> Result<(), String> {
             "/frontend/static/languages/",
             "/frontend/static/quotes/",
             "/frontend/src/ts/constants/themes.ts",
+            "/frontend/src/ts/constants/languages.ts",
         ],
     )?;
     git(

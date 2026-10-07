@@ -48,6 +48,10 @@ fn fixture(root: &Path) {
     );
     write(&root.join("frontend/src/ts/constants/themes.ts"), THEMES_TS);
     write(&root.join("LICENSE"), "GPL-3.0 (fixture)\n");
+    write(
+        &root.join("frontend/src/ts/constants/languages.ts"),
+        "export const LanguageGroups: Record<string, Language[]> = {\n  english: [\"english\"],\n  korean: [\"korean\"],\n};\n",
+    );
 }
 
 #[test]
@@ -78,9 +82,9 @@ fn builds_packs_themes_and_manifest() {
     let manifest: Manifest =
         toml::from_str(&fs::read_to_string(out.join("manifest.toml")).unwrap()).unwrap();
     assert_eq!(manifest.rev, "abc123");
-    assert_eq!(manifest.files.len(), 4);
+    assert_eq!(manifest.files.len(), 5);
     assert!(manifest.files.iter().all(|f| f.sha256.len() == 64));
-    assert!(!dir.join("assets.tmp").exists());
+    assert!(!dir.join(".assets.tmp").exists());
 }
 
 #[test]
@@ -93,6 +97,7 @@ fn build_is_reproducible() {
         "languages.pack",
         "quotes.pack",
         "themes.json",
+        "language_groups.json",
         "manifest.toml",
     ] {
         assert_eq!(
@@ -118,7 +123,7 @@ fn invalid_source_leaves_previous_assets_untouched() {
     let err = build_assets(&dir.join("src"), &out, "r").unwrap_err();
     assert!(err.contains("broken"), "{err}");
     assert_eq!(fs::read(out.join("languages.pack")).unwrap(), before);
-    assert!(!dir.join("assets.tmp").exists());
+    assert!(!dir.join(".assets.tmp").exists());
 }
 
 #[test]
@@ -128,4 +133,57 @@ fn missing_themes_file_is_reported() {
     fs::remove_file(dir.join("src/frontend/src/ts/constants/themes.ts")).unwrap();
     let err = build_assets(&dir.join("src"), &dir.join("assets"), "r").unwrap_err();
     assert!(err.contains("themes.ts"), "{err}");
+}
+
+#[test]
+fn writes_language_groups() {
+    let dir = scratch("groups");
+    fixture(&dir.join("src"));
+    build_assets(&dir.join("src"), &dir.join("assets"), "r").unwrap();
+    let groups: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("assets/language_groups.json")).unwrap())
+            .unwrap();
+    assert_eq!(groups[0]["name"], "english");
+}
+
+#[test]
+fn group_with_unknown_language_is_refused() {
+    let dir = scratch("badgroup");
+    fixture(&dir.join("src"));
+    write(
+        &dir.join("src/frontend/src/ts/constants/languages.ts"),
+        "export const LanguageGroups: Record<string, Language[]> = {\n  english: [\"english\", \"englsh\"],\n};\n",
+    );
+    let err = build_assets(&dir.join("src"), &dir.join("assets"), "r").unwrap_err();
+    assert!(err.contains("englsh"), "{err}");
+}
+
+#[test]
+fn out_without_file_name_is_refused_and_deletes_nothing() {
+    let dir = scratch("dot");
+    fixture(&dir.join("src"));
+    let keep = dir.join("src/frontend/static/languages/english.json");
+    for out in [dir.join("src/."), dir.join("src/frontend/..")] {
+        assert!(
+            build_assets(&dir.join("src"), &out, "r").is_err(),
+            "{}",
+            out.display()
+        );
+        assert!(
+            keep.exists(),
+            "rien ne doit être supprimé ({})",
+            out.display()
+        );
+    }
+}
+
+#[test]
+fn out_with_foreign_files_is_not_wiped() {
+    let dir = scratch("foreign");
+    fixture(&dir.join("src"));
+    let out = dir.join("assets");
+    write(&out.join("notes.txt"), "à garder");
+    let err = build_assets(&dir.join("src"), &out, "r").unwrap_err();
+    assert!(err.contains("notes.txt"), "{err}");
+    assert!(out.join("notes.txt").exists());
 }

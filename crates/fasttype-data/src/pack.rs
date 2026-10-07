@@ -13,6 +13,9 @@ const MAGIC: &[u8; 5] = b"FTPK\x01";
 /// Fenêtre de 128 Mio (`zstd --long=27`) : utile pour les grosses listes de mots.
 const WINDOW_LOG: u32 = 27;
 const LEVEL: i32 = 19;
+/// Taille décompressée maximale d'une entrée : la plus grosse liste fait 12 Mo.
+/// Au-delà, l'index est corrompu ; on refuse plutôt que de réserver la mémoire.
+pub const MAX_ENTRY_LEN: u64 = 64 << 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackEntry {
@@ -29,6 +32,7 @@ pub enum PackError {
     BadIndex(serde_json::Error),
     Io(io::Error),
     SizeMismatch { expected: u64, actual: u64 },
+    TooLarge { raw_len: u64 },
 }
 
 impl fmt::Display for PackError {
@@ -38,6 +42,12 @@ impl fmt::Display for PackError {
             PackError::Truncated => write!(f, "pack : données tronquées"),
             PackError::BadIndex(e) => write!(f, "pack : index illisible ({e})"),
             PackError::Io(e) => write!(f, "pack : décompression impossible ({e})"),
+            PackError::TooLarge { raw_len } => {
+                write!(
+                    f,
+                    "pack : taille annoncée {raw_len} au-delà de {MAX_ENTRY_LEN}"
+                )
+            }
             PackError::SizeMismatch { expected, actual } => {
                 write!(
                     f,
@@ -69,10 +79,14 @@ pub fn compress(raw: &[u8]) -> io::Result<Vec<u8>> {
 
 /// Décompresse une trame et vérifie sa taille.
 pub fn decompress_frame(frame: &[u8], raw_len: u64) -> Result<Vec<u8>, PackError> {
+    if raw_len > MAX_ENTRY_LEN {
+        return Err(PackError::TooLarge { raw_len });
+    }
     let mut dec = zstd::stream::Decoder::new(frame)?;
     dec.window_log_max(WINDOW_LOG)?;
     let mut out = Vec::with_capacity(raw_len as usize);
-    dec.read_to_end(&mut out)?;
+    // un octet de plus que prévu suffit à constater l'écart, sans tout lire
+    dec.take(raw_len + 1).read_to_end(&mut out)?;
     let actual = out.len() as u64;
     if actual != raw_len {
         return Err(PackError::SizeMismatch {
@@ -147,6 +161,9 @@ impl<'a> Pack<'a> {
             let end = e.offset.checked_add(e.len).ok_or(PackError::Truncated)?;
             if end > payload.len() as u64 {
                 return Err(PackError::Truncated);
+            }
+            if e.raw_len > MAX_ENTRY_LEN {
+                return Err(PackError::TooLarge { raw_len: e.raw_len });
             }
         }
         Ok(Self { entries, payload })

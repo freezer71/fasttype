@@ -51,10 +51,11 @@ fn main() -> ExitCode {
     match build_assets(&source, &out, &rev) {
         Ok(s) => {
             println!(
-                "{} langues, {} fichiers de citations, {} thèmes → {}",
+                "{} langues, {} fichiers de citations, {} thèmes, {} groupes de langues → {}",
                 s.languages,
                 s.quotes,
                 s.themes,
+                s.groups,
                 out.display()
             );
             ExitCode::SUCCESS
