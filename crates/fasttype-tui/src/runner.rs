@@ -38,7 +38,7 @@ fn seed() -> u64 {
 fn present(
     term: &mut Term,
     frame: &FrameWriter,
-    app: &App,
+    app: &mut App,
     perf: &Perf,
     last_look: &mut Option<CaretLook>,
 ) -> io::Result<()> {
@@ -86,7 +86,7 @@ pub fn run(opts: Options) -> io::Result<Perf> {
     let mut app = App::new(store, color_mode, clock.now_ms(), seed());
     let mut perf = Perf::new(opts.perf);
     let mut last_look = None;
-    present(&mut term, &frame, &app, &perf, &mut last_look)?;
+    present(&mut term, &frame, &mut app, &perf, &mut last_look)?;
 
     while !app.quit {
         let now = clock.now_ms();
@@ -102,7 +102,7 @@ pub fn run(opts: Options) -> io::Result<Perf> {
         }
         app.tick(clock.now_ms());
         let start = clock.now_ms();
-        present(&mut term, &frame, &app, &perf, &mut last_look)?;
+        present(&mut term, &frame, &mut app, &perf, &mut last_look)?;
         let done = clock.now_ms();
         perf.frame.record(done - start);
         if let Some(t) = oldest_key {

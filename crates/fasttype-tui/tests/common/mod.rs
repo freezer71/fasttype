@@ -88,8 +88,16 @@ pub fn type_whole_test(app: &mut App, start: f64, step: f64) -> f64 {
     t
 }
 
+/// Laisse finir les fondus (restart, résultat) : 250 ms après `t`.
+pub fn settle(app: &mut App, t: f64) -> f64 {
+    let fade = fasttype_tui::app::FADE_MS;
+    app.tick(t + fade);
+    app.tick(t + 2.0 * fade);
+    t + 2.0 * fade
+}
+
 /// Rend l'application dans un terminal de test ; renvoie le tampon et le caret.
-pub fn render(app: &App, w: u16, h: u16) -> (Buffer, Option<(u16, u16)>) {
+pub fn render(app: &mut App, w: u16, h: u16) -> (Buffer, Option<(u16, u16)>) {
     let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
     term.draw(|f| app.draw(f, None)).unwrap();
     let backend = term.backend();

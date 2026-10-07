@@ -1,6 +1,6 @@
 mod common;
 
-use common::{app, press, release, type_text, type_whole_test};
+use common::{app, press, release, settle, type_text, type_whole_test};
 use fasttype_core::event::EventKind;
 use fasttype_core::session::SessionState;
 use fasttype_core::spec::Mode;
@@ -44,6 +44,7 @@ fn tab_then_enter_restarts() {
     assert_eq!(a.session().state(), SessionState::Running);
     a.handle(press(Key::Tab, 200.0));
     a.handle(press(Key::Enter, 300.0));
+    settle(&mut a, 300.0);
     assert_eq!(a.session().state(), SessionState::Ready);
     assert_ne!(a.session().words(), first.as_slice(), "nouveaux mots");
 }
@@ -64,6 +65,7 @@ fn quick_restart_on_tab() {
     let mut a = app("quicktab", "quick_restart = \"tab\"\n");
     type_text(&mut a, "x", 0.0, 100.0);
     a.handle(press(Key::Tab, 200.0));
+    settle(&mut a, 200.0);
     assert_eq!(a.session().state(), SessionState::Ready);
 }
 
@@ -79,6 +81,7 @@ fn long_tests_need_shift_to_quick_restart() {
             .contains("Quick restart disabled")
     );
     a.handle(press(Key::BackTab, 300.0));
+    settle(&mut a, 300.0);
     assert_eq!(a.session().state(), SessionState::Ready);
 }
 
@@ -138,6 +141,8 @@ fn zen_ends_with_shift_enter() {
 fn time_test_ends_on_tick() {
     let mut a = app("time", "time = 15\n");
     type_text(&mut a, "x", 0.0, 100.0);
+    // une fois le focus mode installé, plus rien ne bouge avant le tick
+    a.tick(500.0);
     assert_eq!(a.next_deadline(), Some(1000.0));
     a.tick(15_000.0);
     assert!(matches!(a.screen(), Screen::Result(_)));
@@ -169,6 +174,7 @@ fn result_screen_tab_enter_starts_next_test() {
     type_whole_test(&mut a, 0.0, 300.0);
     a.handle(press(Key::Tab, 99_000.0));
     a.handle(press(Key::Enter, 99_100.0));
+    settle(&mut a, 99_100.0);
     assert!(matches!(a.screen(), Screen::Test));
     assert_eq!(a.session().state(), SessionState::Ready);
 }
@@ -236,6 +242,7 @@ fn zen_result_screen_restarts_on_enter_with_quick_restart_enter() {
     a.handle(press(Key::ShiftEnter, 500.0));
     assert!(matches!(a.screen(), Screen::Result(_)));
     a.handle(press(Key::Enter, 900.0));
+    settle(&mut a, 900.0);
     assert!(matches!(a.screen(), Screen::Test));
 }
 
@@ -266,4 +273,80 @@ fn a_signal_quits() {
     let mut a = app("signal", "");
     a.handle(fasttype_tui::input::Input::Interrupt);
     assert!(a.quit);
+}
+
+#[test]
+fn restart_fades_out_then_in_and_ignores_keys_meanwhile() {
+    use fasttype_tui::app::{FADE_MS, Transition};
+    let mut a = app("fade-restart", "quick_restart = \"tab\"\n");
+    type_text(&mut a, "x", 0.0, 100.0);
+    let first = a.session().words().to_vec();
+    a.handle(press(Key::Tab, 200.0));
+    assert_eq!(a.transition(), Some(Transition::Restart { start: 200.0 }));
+    // pendant le fondu de sortie, le test n'a pas encore changé et les touches sont ignorées
+    a.handle(press(Key::Char('z'), 250.0));
+    assert_eq!(a.session().words(), first.as_slice());
+    assert_eq!(a.session().input(0), "x");
+    a.tick(200.0 + FADE_MS);
+    assert_eq!(
+        a.transition(),
+        Some(Transition::FadeIn {
+            start: 200.0 + FADE_MS
+        })
+    );
+    assert_ne!(a.session().words(), first.as_slice());
+    // le nouveau test accepte la frappe pendant qu'il apparaît
+    let c = a.session().word(0).chars().next().unwrap();
+    a.handle(press(Key::Char(c), 340.0));
+    assert_eq!(a.session().state(), SessionState::Running);
+    a.tick(200.0 + 2.0 * FADE_MS);
+    assert_eq!(a.transition(), None);
+}
+
+#[test]
+fn finishing_fades_the_test_out_then_the_result_in() {
+    use fasttype_tui::app::{FADE_MS, Transition};
+    let mut a = app("fade-result", "mode = \"words\"\nwords = 10\n");
+    let end = type_whole_test(&mut a, 0.0, 300.0);
+    let start = match a.transition() {
+        Some(Transition::ToResult { start }) => start,
+        other => panic!("{other:?}"),
+    };
+    assert!(start <= end);
+    assert!(a.next_deadline().is_some(), "des images pendant le fondu");
+    a.tick(start + 2.0 * FADE_MS);
+    assert_eq!(a.transition(), None);
+    assert_eq!(a.next_deadline(), None, "rien ne bouge sur le résultat");
+}
+
+#[test]
+fn a_fallback_warning_is_shown_once() {
+    let mut a = app(
+        "warn-once",
+        "language = \"klingon_9000k\"\nquick_restart = \"tab\"\n",
+    );
+    a.handle(press(Key::Tab, 0.0));
+    settle(&mut a, 0.0);
+    let n = a
+        .notifications
+        .items()
+        .iter()
+        .filter(|n| n.text.contains("klingon_9000k"))
+        .count();
+    assert_eq!(n, 1);
+}
+
+#[test]
+fn invalid_custom_theme_colors_are_reported_by_the_config() {
+    let a = app(
+        "bad-custom",
+        "custom_theme = true\ncustom_theme_colors = [\"#000000\"]\n",
+    );
+    // la config refuse la liste (10 couleurs attendues) et le signale
+    assert!(
+        a.notifications
+            .items()
+            .iter()
+            .any(|n| n.text.contains("custom_theme_colors"))
+    );
 }
