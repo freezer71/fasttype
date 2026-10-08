@@ -200,3 +200,63 @@ fn a_letter_faded_to_the_background_is_not_drawn() {
     let s = text(out);
     assert!(!s.contains("a=t,") && !s.contains("a=p,"), "{s}");
 }
+
+#[test]
+fn words_under_the_palette_veil_stay_visible() {
+    use fasttype_tui::view::palette::{dim_color, dim_style};
+    let p = palette();
+    let mut g = GlyphText::new(CELL);
+    // voile : couleurs et fond à moitié, comme `dim_style`
+    let veiled = |c: ScaledCell| ScaledCell {
+        style: dim_style(c.style),
+        ..c
+    };
+    let l = layer(
+        vec![veiled(cell(0, 'a', p.sub)), veiled(cell(2, 'b', p.text))],
+        dim_color(p.bg),
+    );
+    let mut out = Vec::new();
+    g.write(&mut out, &l, None, &p.rgb).unwrap();
+    assert_eq!(
+        text(out).matches("a=p,").count(),
+        2,
+        "les mots à venir restent visibles"
+    );
+}
+
+#[test]
+fn a_theme_change_with_the_same_background_redraws_every_letter() {
+    let a = Palette::from_theme(theme("dark").unwrap(), ColorMode::TrueColor);
+    let b = Palette::from_theme(theme("rgb").unwrap(), ColorMode::TrueColor);
+    assert_eq!(a.bg, b.bg, "deux thèmes au même fond");
+    let mut g = GlyphText::new(CELL);
+    let la = layer(vec![cell(0, 'a', a.sub), cell(2, 'b', a.text)], a.bg);
+    let mut out = Vec::new();
+    g.write(&mut out, &la, None, &a.rgb).unwrap();
+    let lb = layer(vec![cell(0, 'a', b.sub), cell(2, 'b', b.text)], b.bg);
+    let mut out = Vec::new();
+    g.write(&mut out, &lb, Some(&la), &b.rgb).unwrap();
+    let s = text(out);
+    assert!(s.contains("a=d,d=R,"));
+    assert_eq!(
+        s.matches("a=p,").count(),
+        2,
+        "toutes les lettres replacées : {s}"
+    );
+    // les identifiants repartent du début après la libération
+    assert!(s.contains(&format!("i={FIRST_ID},")));
+}
+
+#[test]
+fn a_restyle_with_the_same_image_writes_nothing() {
+    let p = palette();
+    let mut g = GlyphText::new(CELL);
+    let l = layer(vec![cell(0, 'a', p.text)], p.bg);
+    let mut out = Vec::new();
+    g.write(&mut out, &l, None, &p.rgb).unwrap();
+    // pendant un fondu : la couleur exacte change, l'image ramenée au thème non
+    let faded = layer(vec![cell(0, 'a', Color::Rgb(0xd0, 0xcf, 0xc4))], p.bg);
+    let mut out = Vec::new();
+    g.write(&mut out, &faded, Some(&l), &p.rgb).unwrap();
+    assert_eq!(text(out), "\x1b7\x1b[0m\x1b8", "rien à replacer");
+}

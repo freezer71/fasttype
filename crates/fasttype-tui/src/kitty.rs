@@ -142,6 +142,10 @@ pub fn hide(out: &mut impl Write, id: u32) -> io::Result<()> {
 /// Supprime toutes les images et libère leur mémoire.
 pub const DELETE_ALL: &[u8] = b"\x1b_Ga=d,d=A,q=2\x1b\\";
 
+/// Libère les images du caret seulement (identifiants sous 1 000 000) : les
+/// lettres agrandies dessinées en images (`glyphs.rs`) restent à l'écran.
+pub const DELETE_CARET: &[u8] = b"\x1b_Ga=d,d=R,x=1,y=999999,q=2\x1b\\";
+
 /// Épaisseur d'un trait fin : 0,1em, pour une case de 1,2em de haut.
 fn thin(cell_h: u32) -> u32 {
     (cell_h as f64 / 12.0).round().max(2.0) as u32
@@ -243,7 +247,7 @@ impl KittyCaret {
     ) -> io::Result<()> {
         if self.rgb != Some(rgb) {
             if self.rgb.is_some() {
-                out.write_all(DELETE_ALL)?;
+                out.write_all(DELETE_CARET)?;
             }
             self.rgb = Some(rgb);
             self.sent.clear();

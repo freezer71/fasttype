@@ -105,8 +105,13 @@ impl Output {
                             self.glyphs = Some(GlyphText::new(cell));
                         }
                     }
-                    // l'écran va être effacé : replacer l'image au prochain dessin
-                    None => k.invalidate(),
+                    // l'écran va être effacé : replacer les images au prochain dessin
+                    None => {
+                        k.invalidate();
+                        if let Some(g) = &mut self.glyphs {
+                            g.reset();
+                        }
+                    }
                 }
             }
         }

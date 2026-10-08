@@ -112,10 +112,11 @@ fn snap(c: Rgb, known: &[Rgb]) -> Rgb {
     known.iter().copied().min_by_key(d).unwrap_or(c)
 }
 
-/// Les 10 couleurs du thème : un fondu ou le voile de la palette retombent
-/// sur l'une d'elles, sans créer une image par teinte intermédiaire.
+/// Les 10 couleurs du thème, et les mêmes sous le voile de la palette (à
+/// moitié) : un fondu retombe sur l'une d'elles, sans créer une image par
+/// teinte intermédiaire, et les mots restent visibles sous la palette.
 fn known_colors(p: &RgbColors) -> Vec<Rgb> {
-    vec![
+    let base = [
         p.bg,
         p.main,
         p.caret,
@@ -126,7 +127,12 @@ fn known_colors(p: &RgbColors) -> Vec<Rgb> {
         p.error_extra,
         p.colorful_error,
         p.colorful_error_extra,
-    ]
+    ];
+    let half = |c: Rgb| (c.0 / 2, c.1 / 2, c.2 / 2);
+    base.iter()
+        .copied()
+        .chain(base.iter().map(|c| half(*c)))
+        .collect()
 }
 
 /// Transmission compressée (`o=z`, zlib) : une lettre est surtout transparente,
@@ -159,8 +165,9 @@ pub struct GlyphText {
     known: Vec<Rgb>,
     images: HashMap<GlyphKey, u32>,
     next_id: u32,
-    /// Image placée à chaque position (coin haut-gauche de la lettre).
-    placed: HashMap<(u16, u16), u32>,
+    /// Ce qui est dessiné à chaque position (coin haut-gauche de la lettre) :
+    /// l'image placée, s'il y en a une, et le fond du bloc.
+    placed: HashMap<(u16, u16), (Option<u32>, Color)>,
 }
 
 /// Placement unique par position : plusieurs lettres partagent une image.
@@ -180,12 +187,20 @@ impl GlyphText {
         }
     }
 
+    /// Oublie tout (images libérées ou écran effacé par le terminal).
+    pub fn reset(&mut self) {
+        self.images.clear();
+        self.placed.clear();
+        self.next_id = FIRST_ID;
+        self.theme = None;
+    }
+
     /// Retire toutes les lettres de l'écran (les images restent en mémoire).
     pub fn clear(&mut self, out: &mut impl Write) -> io::Result<()> {
-        if !self.placed.is_empty() {
+        if self.placed.values().any(|(id, _)| id.is_some()) {
             write!(out, "\x1b_Ga=d,d=r,x={FIRST_ID},y={LAST_ID},q=2\x1b\\")?;
-            self.placed.clear();
         }
+        self.placed.clear();
         Ok(())
     }
 
@@ -212,9 +227,7 @@ impl GlyphText {
     }
 
     fn put(&mut self, buf: &mut Vec<u8>, c: &ScaledCell, t: &ScaledText) -> io::Result<()> {
-        self.paint(buf, c, t.scale, t.bg);
         let pos = (c.x, c.y);
-        let old = self.placed.remove(&pos);
         let fg = c.style.fg.and_then(rgb_of).map(|x| snap(x, &self.known));
         let under = c
             .style
@@ -223,8 +236,8 @@ impl GlyphText {
             .then(|| c.style.underline_color.and_then(rgb_of))
             .flatten()
             .map(|x| snap(x, &self.known));
-        let bg = self.theme.map(|t| t.bg);
-        // une lettre fondue jusqu'au fond n'est pas dessinée
+        // une lettre fondue jusqu'au fond de la zone (voilé ou non) n'est pas dessinée
+        let bg = rgb_of(t.bg).map(|x| snap(x, &self.known));
         let visible = |fg: Rgb| Some(fg) != bg || under.is_some();
         let id = match fg {
             Some(fg) if (!c.ch.is_whitespace() || under.is_some()) && visible(fg) => {
@@ -235,6 +248,14 @@ impl GlyphText {
             }
             _ => None,
         };
+        let block_bg = c.style.bg.unwrap_or(t.bg);
+        let old = self.placed.get(&pos).copied();
+        // même image, même fond (fondu ramené au thème) : rien à écrire
+        if old == Some((id, block_bg)) {
+            return Ok(());
+        }
+        self.paint(buf, c, t.scale, t.bg);
+        let old = old.and_then(|(id, _)| id);
         let p = placement_id(c.x, c.y);
         if let Some(old) = old
             && Some(old) != id
@@ -248,8 +269,8 @@ impl GlyphText {
                 c.y + 1,
                 c.x + 1
             );
-            self.placed.insert(pos, id);
         }
+        self.placed.insert(pos, (id, block_bg));
         Ok(())
     }
 
@@ -265,18 +286,20 @@ impl GlyphText {
     ) -> io::Result<()> {
         let mut buf = Vec::new();
         buf.extend_from_slice(b"\x1b7");
+        let mut theme_changed = false;
         if self.theme.as_ref() != Some(theme) {
             // nouveau thème : les images des anciennes couleurs sont libérées
             if self.theme.is_some() {
                 let _ = write!(buf, "\x1b_Ga=d,d=R,x={FIRST_ID},y={LAST_ID},q=2\x1b\\");
             }
+            self.reset();
             self.theme = Some(*theme);
             self.known = known_colors(theme);
-            self.images.clear();
-            self.placed.clear();
+            theme_changed = true;
         }
         let same = prev.filter(|p| {
-            p.region == layer.region
+            !theme_changed
+                && p.region == layer.region
                 && p.scale == layer.scale
                 && p.bg == layer.bg
                 && p.hole == layer.hole

@@ -180,11 +180,13 @@ fn kitty_caret_sends_each_image_once_and_moves_it() {
     k.draw(&mut out, None, rgb).unwrap();
     assert_eq!(out, b"\x1b_Ga=d,d=i,i=11109,q=2\x1b\\");
     out.clear();
-    // changement de thème : tout est supprimé puis retransmis
+    // changement de thème : seules les images du caret sont libérées (pas les
+    // lettres agrandies, dont les identifiants commencent à 1 000 000)
     k.draw(&mut out, Some(bar(1.0, 1.0, 1.0)), (9, 9, 9))
         .unwrap();
     let fourth = String::from_utf8(out).unwrap();
-    assert!(fourth.starts_with("\x1b_Ga=d,d=A,q=2\x1b\\\x1b_Ga=t"));
+    assert!(fourth.starts_with("\x1b_Ga=d,d=R,x=1,y=999999,q=2\x1b\\\x1b_Ga=t"));
+    assert!(!fourth.contains("d=A") && !fourth.contains("d=a"));
 }
 
 #[test]
