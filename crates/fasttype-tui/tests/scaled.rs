@@ -173,3 +173,27 @@ fn words_use_the_whole_width_like_the_site() {
     let w = words_box(Rect::new(0, 0, 200, 50), 60, false, 2);
     assert_eq!(w.width, 60);
 }
+
+#[test]
+fn languages_outside_the_font_stay_normal_size() {
+    let mut a = app("glyph-latin", "");
+    a.set_text_sizing(true);
+    a.set_scalable_chars(fasttype_tui::glyphs::has_glyph);
+    render(&mut a, 120, 30);
+    assert!(a.scaled_text().is_some(), "anglais : agrandi");
+    let mut a = app("glyph-cjk", "language = \"chinese_simplified\"\n");
+    a.set_text_sizing(true);
+    a.set_scalable_chars(fasttype_tui::glyphs::has_glyph);
+    render(&mut a, 120, 30);
+    assert!(
+        a.scaled_text().is_none(),
+        "chinois : la police n'a pas ces lettres"
+    );
+    // zen : la saisie compte aussi
+    let mut a = app("glyph-zen", "mode = \"zen\"\n");
+    a.set_text_sizing(true);
+    a.set_scalable_chars(fasttype_tui::glyphs::has_glyph);
+    a.handle(press(Key::Char('日'), 0.0));
+    render(&mut a, 120, 30);
+    assert!(a.scaled_text().is_none());
+}

@@ -34,9 +34,9 @@ Dans la palette : `↑`/`↓` (ou `ctrl+k`/`ctrl+j`, `tab`/`shift+tab`) pour se 
 
 ## Terminaux
 
-- **Kitty (0.40 ou plus récent)** : caret au pixel près, et mots en grand (réglage `font size`, 2 par défaut comme sur le site).
-- **Ghostty** : caret au pixel près.
-- **Autres terminaux** (iTerm2, WezTerm, Alacritty, Terminal.app…) : caret du terminal. Pour agrandir le texte, zoomer dans le terminal (`cmd +`).
+- **Kitty (0.40 ou plus récent)** : caret au pixel près, et mots en grand avec la police du terminal (réglage `font size`, 2 par défaut comme sur le site).
+- **Ghostty, WezTerm** : caret au pixel près, et mots en grand dessinés en images avec la police du site (Roboto Mono). Les écritures que Roboto Mono ne couvre pas (chinois, japonais, hébreu…) restent à la taille du terminal.
+- **Autres terminaux** (iTerm2, Alacritty, Terminal.app…) : caret du terminal. Pour agrandir le texte, zoomer dans le terminal (`cmd +`).
 
 `FASTTYPE_CARET=cell` ou `FASTTYPE_CARET=kitty` force le rendu du caret.
 

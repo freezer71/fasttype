@@ -3,6 +3,7 @@
 //! dessine aussitôt une seule image.
 
 use crate::app::{App, CaretLook};
+use crate::glyphs::{GlyphText, has_glyph};
 #[cfg(unix)]
 use crate::input::spawn_signal_watcher;
 use crate::input::{Input, spawn_reader};
@@ -81,6 +82,8 @@ struct Output {
     size: Size,
     /// Mots agrandis déjà à l'écran : rien à réécrire s'ils n'ont pas changé.
     scaled: Option<ScaledText>,
+    /// Mots agrandis dessinés en images (Ghostty, WezTerm) ; `None` : OSC 66.
+    glyphs: Option<GlyphText>,
 }
 
 impl Output {
@@ -98,6 +101,9 @@ impl Output {
                     Some(cell) => {
                         self.term.backend_mut().write_all(DELETE_ALL)?;
                         *k = KittyCaret::new(cell);
+                        if self.glyphs.is_some() {
+                            self.glyphs = Some(GlyphText::new(cell));
+                        }
                     }
                     // l'écran va être effacé : replacer l'image au prochain dessin
                     None => k.invalidate(),
@@ -116,9 +122,14 @@ impl Output {
             .draw(|f| app.draw(f, perf.enabled.then_some(perf)))?;
         let scaled = app.scaled_text();
         if scaled != self.scaled.as_ref() {
-            if let Some(t) = scaled {
+            let out = self.term.backend_mut();
+            match (&mut self.glyphs, scaled) {
                 // seules les lettres qui ont changé : quelques dizaines d'octets par frappe
-                t.write_changes(self.scaled.as_ref(), self.term.backend_mut())?;
+                (None, Some(t)) => t.write_changes(self.scaled.as_ref(), out)?,
+                (Some(g), Some(t)) => g.write(out, t, self.scaled.as_ref(), &app.palette().rgb)?,
+                // plus de mots agrandis : retirer les images (ratatui réécrit les cases)
+                (Some(g), None) => g.clear(out)?,
+                (None, None) => {}
             }
             self.scaled = scaled.cloned();
         }
@@ -179,6 +190,18 @@ pub fn run(opts: Options) -> io::Result<Perf> {
         }
         CaretRenderer::Cell => None,
     };
+    // mots agrandis : OSC 66 (Kitty), sinon dessinés en images si le terminal
+    // affiche les images Kitty (Ghostty, WezTerm), sinon taille de base
+    let glyphs = match renderer {
+        CaretRenderer::Kitty(cell) if !text_sizing_supported() => Some(GlyphText::new(cell)),
+        _ => None,
+    };
+    let mut app = App::new(store, color_mode, clock.now_ms(), seed());
+    app.set_caret_renderer(renderer);
+    app.set_text_sizing(text_sizing_supported() || glyphs.is_some());
+    if glyphs.is_some() {
+        app.set_scalable_chars(has_glyph);
+    }
     let mut out = Output {
         size: term.size()?,
         term,
@@ -186,10 +209,8 @@ pub fn run(opts: Options) -> io::Result<Perf> {
         last_look: None,
         kitty,
         scaled: None,
+        glyphs,
     };
-    let mut app = App::new(store, color_mode, clock.now_ms(), seed());
-    app.set_caret_renderer(renderer);
-    app.set_text_sizing(text_sizing_supported());
     app.set_fps(opts.fps);
     let mut perf = Perf::new(opts.perf);
     app.tick(clock.now_ms());

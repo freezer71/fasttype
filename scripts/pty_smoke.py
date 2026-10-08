@@ -101,6 +101,8 @@ else:
     os.write(fd, b"\x03")  # Ctrl+C
 pump(1.0)
 _, status = os.waitpid(pid, 0)
+if os.environ.get("FASTTYPE_DUMP"):
+    open(os.environ["FASTTYPE_DUMP"], "wb").write(bytes(out))
 print("exit", os.waitstatus_to_exitcode(status))
 print("result screen:", "test type custom english" in screen)
 print("alt screen left:", b"\x1b[?1049l" in out)
@@ -109,6 +111,9 @@ print("cursor color reset:", b"\x1b]112\x07" in out)
 print("bracketed paste reset:", b"\x1b[?2004l" in out)
 if kitty:
     print("kitty caret placed:", b"\x1b_Ga=p," in out)
+    if not sized:
+        # Ghostty, WezTerm : images Kitty sans OSC 66 → mots dessinés en images
+        print("glyph letters placed:", b"\x1b_Ga=p,i=1000000," in out)
     print("kitty images deleted:", out.rstrip().find(b"\x1b_Ga=d,d=A,q=2\x1b\\") > out.find(b"\x1b_Ga=p,"))
 if palette:
     print("command line shown:", palette_seen)

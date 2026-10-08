@@ -183,6 +183,13 @@ thread input  ──(canal borné)──▶  boucle principale
 
 **Notifications** : une pile en haut à droite. Elles disparaissent après 3 s ; les erreurs restent jusqu'à ce qu'on les ferme. Exemples : « Test invalid - too short », « Quick restart disabled in long tests ».
 
+**Taille des mots** (ajout du 2026-10-08) : comme sur le site, les mots sont à `fontSize` fois la taille du reste de l'interface (2 par défaut, échelle entière de 1 à 4). Trois rendus, choisis au démarrage :
+1. `osc66` : le protocole de texte agrandi de Kitty (≥ 0.40), avec la police du terminal.
+2. `glyphs` : si le terminal affiche les images Kitty mais pas OSC 66 (Ghostty, WezTerm), chaque lettre est dessinée en image avec la police du site (Roboto Mono, embarquée, SIL OFL 1.1), transmise compressée une fois par couleur du thème, puis placée sur la grille. Seules les lettres qui changent sont replacées. Si la police n'a pas une lettre du test (CJK, hébreu…), les mots restent à la taille de base.
+3. Sinon, taille de base : seul le zoom du terminal agrandit.
+
+**Restart** (ajout du 2026-10-08, demande de l'utilisateur) : `quickRestart` vaut `tab` par défaut (le site : `off`, c'est-à-dire tab puis enter). Le nouveau test est créé tout de suite et apparaît en fondu ; les touches tapées pendant ce fondu comptent (le site les ignore 250 ms).
+
 ### 5.4 Thèmes et couleurs
 - 10 couleurs par thème : `bg`, `main`, `caret`, `sub`, `subAlt`, `text`, `error`, `errorExtra`, `colorfulError`, `colorfulErrorExtra`.
 - Si le terminal n'a pas le truecolor (`COLORTERM`), chaque couleur est convertie vers la plus proche des 256 couleurs (distance perceptuelle OKLab), avec un cache.

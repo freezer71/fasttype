@@ -184,6 +184,8 @@ pub struct App {
     text_sizing: bool,
     /// Mots agrandis du dernier dessin, à écrire par la boucle.
     scaled: Option<ScaledText>,
+    /// Caractères que le rendu des mots agrandis sait dessiner.
+    scalable: fn(char) -> bool,
     /// Zone des mots agrandis de l'image précédente : à redessiner en entier
     /// quand elle disparaît (ratatui n'y avait rien écrit).
     last_scaled_region: Option<Rect>,
@@ -332,6 +334,7 @@ impl App {
             transition: None,
             text_sizing: false,
             scaled: None,
+            scalable: |_| true,
             last_scaled_region: None,
             words_top: None,
             command_line: None,
@@ -367,6 +370,26 @@ impl App {
     /// Le terminal sait agrandir le texte (OSC 66, détecté au démarrage).
     pub fn set_text_sizing(&mut self, supported: bool) {
         self.text_sizing = supported;
+    }
+
+    /// Mots agrandis dessinés en images : seulement si la police embarquée a
+    /// toutes les lettres (sinon, taille de base pour ce test).
+    pub fn set_scalable_chars(&mut self, has: fn(char) -> bool) {
+        self.scalable = has;
+    }
+
+    /// Les mots autour de la fenêtre visible s'agrandissent tous : 200 mots à
+    /// partir de la ligne du haut, cibles et saisies (coût borné).
+    fn window_is_scalable(&self) -> bool {
+        let s = &self.session;
+        let from = self.window.start.min(s.words().len());
+        let to = (from + 200).min(s.words().len());
+        (from..to).all(|i| {
+            s.word(i)
+                .chars()
+                .chain(s.input(i).chars())
+                .all(self.scalable)
+        })
     }
 
     /// Mots agrandis du dernier `draw`, à écrire après le dessin ratatui.
@@ -1233,7 +1256,7 @@ impl App {
             .config
             .int("maxLineWidth")
             .clamp(0, i64::from(u16::MAX)) as u16;
-        let scale = if self.text_sizing {
+        let scale = if self.text_sizing && self.window_is_scalable() {
             scale_for(self.store.config.float("fontSize"))
         } else {
             1

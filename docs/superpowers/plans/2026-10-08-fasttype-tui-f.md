@@ -2497,7 +2497,7 @@ sans texte agrandi (Ghostty, WezTerm) :
 ```
 
 `README.md` (version complète) :
-```markdown
+````markdown
 # fasttype
 
 Monkeytype dans le terminal : mêmes modes, mêmes calculs, mêmes thèmes, mêmes animations, tout hors ligne.
@@ -2554,8 +2554,7 @@ Les variables `XDG_CONFIG_HOME` et `XDG_DATA_HOME` sont respectées.
 ## Licence
 
 GPL-3.0. Les données (langues, citations, thèmes) et les formules viennent de [Monkeytype](https://github.com/monkeytypegame/monkeytype) (voir `NOTICE`).
-```
-
+````
 Dans la spec, ajouter juste avant `### 5.4 Thèmes et couleurs` :
 ```markdown
 **Taille des mots** (ajout du 2026-10-08) : comme sur le site, les mots sont à `fontSize` fois la taille du reste de l'interface (2 par défaut, échelle entière de 1 à 4). Trois rendus, choisis au démarrage :
