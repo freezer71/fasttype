@@ -129,8 +129,6 @@ pub struct CaretLook {
 /// l'écran disparaît avant un restart, comme sur le site.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Transition {
-    /// L'écran actuel disparaît ; le nouveau test est créé à `start + FADE_MS`.
-    Restart { start: f64 },
     /// Le test disparaît, puis le résultat apparaît.
     ToResult { start: f64 },
     /// Le nouveau test apparaît.
@@ -701,7 +699,9 @@ impl App {
             return;
         }
         self.restart_armed = None;
-        self.transition = Some(Transition::Restart { start: now });
+        // nouveau test tout de suite (il apparaît en fondu) : on peut taper sans
+        // attendre, contrairement au site qui ignore les touches 250 ms
+        self.restart(now);
     }
 
     fn finish(&mut self, now: f64) {
@@ -767,14 +767,7 @@ impl App {
             self.quit = true;
             return;
         }
-        // le restart dure ses deux fondus (`isTestRestarting`) : les touches sont ignorées
         self.advance_transitions(at);
-        if matches!(
-            self.transition,
-            Some(Transition::Restart { .. } | Transition::FadeIn { .. })
-        ) {
-            return;
-        }
         if self.command_line.is_some() {
             self.palette_key(key, at);
             return;
@@ -859,14 +852,8 @@ impl App {
         self.update_motion(at);
     }
 
-    /// Fait avancer les fondus jusqu'à `now` : le restart a lieu à la fin du
-    /// fondu de sortie, même si aucun tick n'est tombé pile à ce moment.
+    /// Fait avancer les fondus jusqu'à `now`.
     fn advance_transitions(&mut self, now: f64) {
-        if let Some(Transition::Restart { start }) = self.transition
-            && now >= start + FADE_MS
-        {
-            self.restart(start + FADE_MS);
-        }
         match self.transition {
             Some(Transition::ToResult { start }) if now >= start + 2.0 * FADE_MS => {
                 self.transition = None;
@@ -903,8 +890,7 @@ impl App {
     /// Recible les animations qui suivent l'état : focus mode, stats en direct,
     /// barre de progression, clignotement du caret.
     fn update_motion(&mut self, now: f64) {
-        let on_test = matches!(self.screen, Screen::Test)
-            && !matches!(self.transition, Some(Transition::Restart { .. }));
+        let on_test = matches!(self.screen, Screen::Test);
         let state = self.session.state();
         let running = on_test && state == SessionState::Running;
         self.chrome
@@ -1096,7 +1082,6 @@ impl App {
         let on_result = matches!(self.screen, Screen::Result(_));
         let fade_in = |start: f64| OUT2.apply((now - start) / FADE_MS);
         match self.transition {
-            Some(Transition::Restart { start }) => (on_result, 1.0 - fade_in(start)),
             Some(Transition::ToResult { start }) if now < start + FADE_MS => {
                 (false, 1.0 - fade_in(start))
             }
@@ -1146,6 +1131,7 @@ impl App {
                         .quote
                         .as_ref()
                         .map(|q| q.source.as_str()),
+                    quick_restart: c.str("quickRestart"),
                 }
                 .render(buf, area);
             }
@@ -1347,12 +1333,7 @@ impl App {
     ) -> Option<(u16, u16)> {
         let style = self.caret_style();
         let s = &self.session;
-        let restarting = matches!(self.transition, Some(Transition::Restart { .. }));
-        if style == CaretStyle::Off
-            || s.state() == SessionState::Finished
-            || s.words().is_empty()
-            || restarting
-        {
+        if style == CaretStyle::Off || s.state() == SessionState::Finished || s.words().is_empty() {
             return None;
         }
         let (line, col) = layout.caret;

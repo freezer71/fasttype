@@ -173,7 +173,8 @@ pub const SCHEMA: &[KeyDef] = &[
         group: Group::Behavior,
         display: "quick restart",
         kind: Kind::Choice(&["off", "esc", "tab", "enter"]),
-        default: "\"off\"",
+        // écart voulu au site (« off » : tab puis enter) : Tab seul relance
+        default: "\"tab\"",
     },
     KeyDef {
         name: "repeatQuotes",

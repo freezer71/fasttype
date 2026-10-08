@@ -38,7 +38,7 @@ fn a_finished_words_test_is_saved_with_a_personal_best() {
 
 #[test]
 fn tab_then_enter_restarts() {
-    let mut a = app("tabenter", "");
+    let mut a = app("tabenter", "quick_restart = \"off\"\n");
     let first = a.session().words().to_vec();
     type_text(&mut a, "x", 0.0, 100.0);
     assert_eq!(a.session().state(), SessionState::Running);
@@ -51,7 +51,7 @@ fn tab_then_enter_restarts() {
 
 #[test]
 fn another_key_cancels_tab() {
-    let mut a = app("disarm", "");
+    let mut a = app("disarm", "quick_restart = \"off\"\n");
     let first = a.session().words().to_vec();
     a.handle(press(Key::Tab, 0.0));
     type_text(&mut a, "x", 10.0, 100.0);
@@ -276,48 +276,31 @@ fn a_signal_quits() {
 }
 
 #[test]
-fn restart_fades_out_then_in_and_ignores_keys_meanwhile() {
-    use fasttype_tui::app::{FADE_MS, Transition};
-    let mut a = app("fade-restart", "quick_restart = \"tab\"\n");
-    type_text(&mut a, "x", 0.0, 100.0);
+fn tab_alone_restarts_by_default() {
+    let mut a = app("tab-default", "");
+    assert_eq!(a.store.config.str("quickRestart"), "tab");
     let first = a.session().words().to_vec();
+    type_text(&mut a, "x", 0.0, 100.0);
     a.handle(press(Key::Tab, 200.0));
-    assert_eq!(a.transition(), Some(Transition::Restart { start: 200.0 }));
-    // pendant le fondu de sortie, le test n'a pas encore changé et les touches sont ignorées
-    a.handle(press(Key::Char('z'), 250.0));
-    assert_eq!(a.session().words(), first.as_slice());
-    assert_eq!(a.session().input(0), "x");
-    a.tick(200.0 + FADE_MS);
-    assert_eq!(
-        a.transition(),
-        Some(Transition::FadeIn {
-            start: 200.0 + FADE_MS
-        })
-    );
-    assert_ne!(a.session().words(), first.as_slice());
-    // comme sur le site, les touches restent ignorées pendant que le test apparaît
-    let c = a.session().word(0).chars().next().unwrap();
-    a.handle(press(Key::Char(c), 340.0));
+    // le nouveau test existe tout de suite, sans attendre un fondu
+    assert_ne!(a.session().words(), first.as_slice(), "nouveaux mots");
     assert_eq!(a.session().state(), SessionState::Ready);
-    // dès la fin du fondu, une touche compte, même avant le prochain tick
-    a.handle(press(Key::Char(c), 200.0 + 2.0 * FADE_MS + 1.0));
-    assert_eq!(a.transition(), None);
-    assert_eq!(a.session().state(), SessionState::Running);
 }
 
 #[test]
-fn a_key_right_after_the_fade_out_is_not_lost() {
-    use fasttype_tui::app::FADE_MS;
-    let mut a = app("fade-edge", "quick_restart = \"tab\"\n");
-    a.handle(press(Key::Tab, 100.0));
-    a.tick(100.0);
-    // aucun tick entre la fin des fondus et la touche
-    let c = {
-        a.tick(100.0 + FADE_MS);
-        a.session().word(0).chars().next().unwrap()
-    };
-    a.handle(press(Key::Char(c), 100.0 + 2.0 * FADE_MS + 3.0));
+fn typing_right_after_a_restart_is_kept() {
+    use fasttype_tui::app::{FADE_MS, Transition};
+    let mut a = app("restart-type", "");
+    type_text(&mut a, "x", 0.0, 100.0);
+    a.handle(press(Key::Tab, 200.0));
+    assert_eq!(a.transition(), Some(Transition::FadeIn { start: 200.0 }));
+    // une frappe 1 ms après Tab compte : le test apparaît en fondu, sans rien ignorer
+    let c = a.session().word(0).chars().next().unwrap();
+    a.handle(press(Key::Char(c), 201.0));
     assert_eq!(a.session().state(), SessionState::Running);
+    assert_eq!(a.session().input(0), c.to_string());
+    a.tick(200.0 + FADE_MS);
+    assert_eq!(a.transition(), None);
 }
 
 #[test]

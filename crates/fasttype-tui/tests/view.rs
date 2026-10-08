@@ -12,7 +12,7 @@ fn test_screen_shows_header_words_and_tips() {
     assert!(row(&buf, 3).contains("time"), "{text}");
     assert!(row(&buf, 3).contains("30"));
     assert!(text.contains("english"), "badge de langue");
-    assert!(text.contains("tab + enter - restart"));
+    assert!(text.contains("tab - restart"));
     let first = a.session().word(0).trim_end().to_string();
     let words_row = (0..24)
         .find(|&y| row(&buf, y).contains(&first))
@@ -133,4 +133,21 @@ fn zero_sized_terminal_does_not_panic() {
         let (_, caret) = render(&mut a, w, h);
         assert_eq!(caret, None, "{w}×{h}");
     }
+}
+
+#[test]
+fn result_tips_follow_quick_restart() {
+    let mut a = app("v-result-tab", "mode = \"words\"\nwords = 10\n");
+    let end = type_whole_test(&mut a, 0.0, 20.0);
+    settle(&mut a, end);
+    let (buf, _) = render(&mut a, 100, 30);
+    assert!(screen_text(&buf).contains("tab - next test"));
+    let mut a = app(
+        "v-result-off",
+        "mode = \"words\"\nwords = 10\nquick_restart = \"off\"\n",
+    );
+    let end = type_whole_test(&mut a, 0.0, 20.0);
+    settle(&mut a, end);
+    let (buf, _) = render(&mut a, 100, 30);
+    assert!(screen_text(&buf).contains("tab + enter - next test"));
 }

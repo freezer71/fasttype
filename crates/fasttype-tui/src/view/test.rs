@@ -184,23 +184,29 @@ pub struct Chrome<'a> {
     pub words_top: Option<u16>,
 }
 
-/// Raccourcis du pied de page selon `quickRestart` : touches de restart, puis
-/// touche de la palette (Tab quand Échap relance). Chaque segment : (texte, touche ?).
-pub fn key_tips(config: &Config) -> Vec<(String, bool)> {
-    let quick = config.str("quickRestart");
-    let restart: &[&str] = match quick {
+/// Touches de restart selon `quickRestart` : `tab + enter` si « off ».
+pub fn restart_tips(quick: &str) -> Vec<(String, bool)> {
+    let keys: &[&str] = match quick {
         "tab" => &["tab"],
         "esc" => &["esc"],
         "enter" => &["enter"],
         _ => &["tab", "enter"],
     };
     let mut tips = Vec::new();
-    for (i, k) in restart.iter().enumerate() {
+    for (i, k) in keys.iter().enumerate() {
         if i > 0 {
             tips.push((" + ".to_string(), false));
         }
         tips.push((k.to_string(), true));
     }
+    tips
+}
+
+/// Raccourcis du pied de page selon `quickRestart` : touches de restart, puis
+/// touche de la palette (Tab quand Échap relance). Chaque segment : (texte, touche ?).
+pub fn key_tips(config: &Config) -> Vec<(String, bool)> {
+    let quick = config.str("quickRestart");
+    let mut tips = restart_tips(quick);
     tips.push((" - restart   ".to_string(), false));
     tips.push((
         (if quick == "esc" { "tab" } else { "esc" }).to_string(),

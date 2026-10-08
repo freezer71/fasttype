@@ -180,11 +180,14 @@ fn command_line_is_drawn_over_the_test() {
 fn key_tips_follow_quick_restart() {
     let mut a = app("cl-tips", "");
     let (buf, _) = render(&mut a, 100, 30);
+    assert!(screen_text(&buf).contains("tab - restart   esc - command line"));
+    let mut a = app("cl-tips-off", "quick_restart = \"off\"\n");
+    let (buf, _) = render(&mut a, 100, 30);
     assert!(screen_text(&buf).contains("tab + enter - restart   esc - command line"));
     let mut a = app("cl-tips-esc", "quick_restart = \"esc\"\n");
     let (buf, _) = render(&mut a, 100, 30);
     assert!(screen_text(&buf).contains("esc - restart   tab - command line"));
-    let mut a = app("cl-tips-off", "show_key_tips = false\n");
+    let mut a = app("cl-tips-hidden", "show_key_tips = false\n");
     let (buf, _) = render(&mut a, 100, 30);
     assert!(!screen_text(&buf).contains("restart"));
 }
@@ -266,7 +269,7 @@ fn a_previewed_theme_is_not_dimmed() {
 
 #[test]
 fn tab_then_the_command_line_disarms_the_restart() {
-    let mut a = app("cl-armed", "");
+    let mut a = app("cl-armed", "quick_restart = \"off\"\n");
     type_text(&mut a, "x", 0.0, 50.0);
     a.handle(press(Key::Tab, 100.0));
     a.handle(press(Key::Esc, 110.0));

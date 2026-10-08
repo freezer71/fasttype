@@ -4,6 +4,7 @@ use crate::theme::Palette;
 use crate::view::big;
 use crate::view::centered_segments;
 use crate::view::chart::ChartView;
+use crate::view::test::restart_tips;
 use fasttype_core::result::{Invalid, TestResult};
 use fasttype_core::spec::Mode;
 use fasttype_store::RecordOutcome;
@@ -25,6 +26,8 @@ pub struct ResultView<'a> {
     pub start_graphs_at_zero: bool,
     /// Source de la citation (mode quote).
     pub quote_source: Option<&'a str>,
+    /// `quickRestart` : touches indiquées pour le test suivant.
+    pub quick_restart: &'a str,
 }
 
 /// Facteur de conversion depuis le wpm (`typing-speed-units.ts`).
@@ -233,15 +236,12 @@ impl ResultView<'_> {
                 ],
             );
         }
-        let tips = [
-            ("tab".to_string(), Style::default().fg(p.sub_alt).bg(p.sub)),
-            (" + ".to_string(), label),
-            (
-                "enter".to_string(),
-                Style::default().fg(p.sub_alt).bg(p.sub),
-            ),
-            (" - next test".to_string(), label),
-        ];
+        let key = Style::default().fg(p.sub_alt).bg(p.sub);
+        let mut tips: Vec<(String, Style)> = restart_tips(self.quick_restart)
+            .into_iter()
+            .map(|(t, is_key)| (t, if is_key { key } else { label }))
+            .collect();
+        tips.push((" - next test".to_string(), label));
         centered_segments(buf, area, area.bottom().saturating_sub(2), &tips);
     }
 }
