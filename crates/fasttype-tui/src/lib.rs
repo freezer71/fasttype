@@ -3,6 +3,7 @@
 pub mod anim;
 pub mod app;
 pub mod caret;
+pub mod glyphs;
 pub mod input;
 pub mod kitty;
 pub mod layout;

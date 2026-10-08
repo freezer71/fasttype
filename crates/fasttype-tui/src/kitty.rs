@@ -117,6 +117,7 @@ pub fn transmit(id: u32, w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
 
 /// Place l'image `id` dans la case (`col`, `row`), décalée de (`dx`, `dy`) pixels.
 /// Replacer la même image déplace son unique placement (`p=1`), sans clignotement.
+/// `z=1` : au-dessus des lettres agrandies dessinées en images (`glyphs.rs`).
 pub fn place(
     out: &mut impl Write,
     id: u32,
@@ -127,7 +128,7 @@ pub fn place(
 ) -> io::Result<()> {
     write!(
         out,
-        "\x1b[{};{}H\x1b_Ga=p,i={id},p=1,X={dx},Y={dy},C=1,q=2\x1b\\",
+        "\x1b[{};{}H\x1b_Ga=p,i={id},p=1,X={dx},Y={dy},C=1,z=1,q=2\x1b\\",
         row + 1,
         col + 1
     )

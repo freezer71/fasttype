@@ -118,7 +118,10 @@ fn transmit_is_chunked_at_4096() {
 fn placement_moves_the_cursor_then_places() {
     let mut out = Vec::new();
     place(&mut out, 1101, 4, 2, 3, 0).unwrap();
-    assert_eq!(out, b"\x1b[3;5H\x1b_Ga=p,i=1101,p=1,X=3,Y=0,C=1,q=2\x1b\\");
+    assert_eq!(
+        out,
+        b"\x1b[3;5H\x1b_Ga=p,i=1101,p=1,X=3,Y=0,C=1,z=1,q=2\x1b\\"
+    );
 }
 
 #[test]
@@ -161,7 +164,7 @@ fn kitty_caret_sends_each_image_once_and_moves_it() {
     k.draw(&mut out, Some(bar(3.5, 2.0, 1.0)), rgb).unwrap();
     let first = String::from_utf8(out.clone()).unwrap();
     assert!(first.contains("a=t"), "transmission");
-    assert!(first.ends_with("\x1b[3;4H\x1b_Ga=p,i=11117,p=1,X=4,Y=0,C=1,q=2\x1b\\"));
+    assert!(first.ends_with("\x1b[3;4H\x1b_Ga=p,i=11117,p=1,X=4,Y=0,C=1,z=1,q=2\x1b\\"));
     out.clear();
     k.draw(&mut out, Some(bar(3.6, 2.0, 1.0)), rgb).unwrap();
     let second = String::from_utf8(out.clone()).unwrap();
