@@ -158,3 +158,18 @@ fn bar_and_language_badge_each_get_their_row() {
         .expect("barre");
     assert!(row(&buf, bar).contains("@") && row(&buf, bar).contains("custom"));
 }
+
+#[test]
+fn words_use_the_whole_width_like_the_site() {
+    use fasttype_tui::view::test::words_box;
+    use ratatui::layout::Rect;
+    // comme le site (maxLineWidth 0) : presque toute la largeur, sans plafond
+    let w = words_box(Rect::new(0, 0, 200, 50), 0, false, 1);
+    assert_eq!(w.width, 192);
+    let w = words_box(Rect::new(0, 0, 200, 50), 0, false, 2);
+    assert_eq!(w.width, 96, "96 lettres agrandies");
+    assert_eq!(w.left, 4);
+    // maxLineWidth limite toujours la ligne, en lettres
+    let w = words_box(Rect::new(0, 0, 200, 50), 60, false, 2);
+    assert_eq!(w.width, 60);
+}

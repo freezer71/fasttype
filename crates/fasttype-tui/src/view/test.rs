@@ -29,8 +29,8 @@ fn letter_colors(p: &Palette, flip: bool, colorful: bool) -> (Color, Color, Colo
 }
 
 /// Place de la zone de mots : centrée, 3 lignes (2 en zen) de lettres à
-/// l'échelle `scale`. Largeur : `maxLineWidth` lettres (0 = automatique :
-/// 100 cases de l'écran au plus). L'échelle baisse si la zone ne tient pas.
+/// l'échelle `scale`. Largeur : `maxLineWidth` lettres, ou toute la largeur
+/// (0, par défaut). L'échelle baisse si la zone ne tient pas.
 pub fn words_box(area: Rect, max_line_width: u16, zen: bool, scale: u16) -> WordsBox {
     let lines = if zen { 2 } else { 3 };
     let mut scale = scale.max(1);
@@ -45,7 +45,8 @@ pub fn words_box(area: Rect, max_line_width: u16, zen: bool, scale: u16) -> Word
             .saturating_mul(scale)
             .min(area.width.saturating_sub(2))
     } else {
-        area.width.saturating_sub(8).min(100)
+        // comme le site (`maxLineWidth` 0) : toute la largeur, moins une marge
+        area.width.saturating_sub(8)
     };
     let width = screen / scale;
     WordsBox {
