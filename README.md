@@ -2,7 +2,31 @@
 
 Monkeytype dans le terminal : mêmes modes, mêmes calculs, mêmes thèmes, mêmes animations, tout hors ligne.
 
-## Lancer
+![Démo](docs/images/demo.gif)
+
+| Pendant le test | Résultat | Palette et thèmes |
+|---|---|---|
+| ![Pendant le test](docs/images/typing.png) | ![Résultat](docs/images/result.png) | ![Palette et thèmes](docs/images/themes.png) |
+
+- Modes `time`, `words`, `quote`, `zen` et `custom`, avec ponctuation et nombres.
+- Les langues, citations et thèmes de Monkeytype, embarqués dans le binaire.
+- wpm, raw, précision, régularité et graphique calculés comme sur le site ; records et historique enregistrés en local.
+- Palette de commandes (`esc`) avec tous les réglages, et aperçu des thèmes en direct.
+- Caret qui glisse au pixel près et mots en grand dans Kitty et Ghostty.
+
+## Installer
+
+Télécharger l'archive de sa plateforme dans les [releases](https://github.com/freezer71/fasttype/releases/latest) (Linux, macOS, Windows), l'extraire et lancer `fasttype`.
+
+Sur macOS, si le système bloque le binaire téléchargé : `xattr -d com.apple.quarantine fasttype`.
+
+Depuis les sources (Rust 1.97 ou plus récent) :
+
+```sh
+cargo install --git https://github.com/freezer71/fasttype fasttype-tui
+```
+
+## Lancer depuis les sources
 
 ```sh
 cargo run --release -p fasttype-tui            # depuis la racine du projet
@@ -24,7 +48,7 @@ Options :
 
 | Touche | Effet |
 |---|---|
-| `tab` puis `enter` | nouveau test (`quick restart` : `tab`, `esc` ou `enter` seuls, dans la palette) |
+| `tab` | nouveau test (réglable dans la palette : `quick restart`) |
 | `esc` ou `ctrl+shift+p` | palette de commandes : tous les réglages, thèmes, langues, citations, texte custom… |
 | `shift+enter` | termine un test zen |
 | `ctrl+backspace`, `alt+backspace`, `ctrl+w` | efface le mot |
